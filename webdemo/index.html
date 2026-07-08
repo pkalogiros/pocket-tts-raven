@@ -273,6 +273,9 @@
 	#load-label { color: var(--phosphor); font-size: 18px;
 		text-shadow: 0 0 6px rgba(107,255,107,.4); }
 	#load-label::before { content: "C:\\> "; color: var(--ash); }
+	#load-label::after { content: "."; display: inline-block; width: .4em;
+		vertical-align: bottom; animation: load-dot 1s steps(2, start) infinite; }
+	@keyframes load-dot { 50% { opacity: 0; } }
 
 	/* ── clone modal ────────────────────────────────────────────────────── */
 	#clone-modal { position: fixed; inset: 0; background: rgba(4,2,8,.72);
@@ -311,6 +314,10 @@
 	.msg { font-size: 18px; padding: 9px 12px; background: var(--pit);
 		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
 	.msg.err { color: var(--blood-lite); }
+	.msg.busy { color: var(--amber); }
+	.msg.busy::after { content: "..."; display: inline-block; width: 0;
+		overflow: hidden; vertical-align: bottom; animation: clone-dots 1.1s steps(4, end) infinite; }
+	@keyframes clone-dots { to { width: 1.2em; } }
 	.msg.warn { color: var(--amber); }
 	.msg.ok { color: var(--phosphor); }
 	#clone-name { border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
@@ -382,7 +389,13 @@
 		border-left: 3px solid var(--amber); }
 	.writeup .agent-note h3 { margin-top: 0; color: var(--amber); }
 	.writeup .agent-note h3::before { content: none; }
-	.writeup a { color: var(--amber); }
+	.writeup a { color: var(--amber); text-decoration-color: rgba(242,183,82,.55);
+		text-underline-offset: .18em; transition: color .12s ease, background-color .12s ease,
+		text-decoration-color .12s ease, box-shadow .12s ease; }
+	.writeup a:hover { color: var(--bone); background: rgba(242,183,82,.12);
+		text-decoration-color: var(--amber); box-shadow: 0 2px 0 rgba(242,183,82,.28); }
+	.writeup a:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px;
+		background: rgba(242,183,82,.14); }
 	.writeup strong { color: var(--phosphor); font-weight: 400;
 		text-shadow: 0 0 6px rgba(107,255,107,.35); }
 	.writeup table { width: 100%; border-collapse: collapse; margin: 16px 0 6px;
@@ -427,7 +440,7 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.marquee span, .pixel-raven .raven-eye, .pixel-raven.hop, #status::after,
-		.hero-line .blink, #record.recording { animation: none; }
+		.hero-line .blink, #record.recording, #load-label::after, .msg.busy::after { animation: none; }
 		#toast, #overlay { transition: none; }
 	}
 
@@ -525,6 +538,7 @@
 		height: 7px; padding: 0; }
 	html[data-theme="clean"] #load-bar { background: #1C2024; border-radius: inherit; }
 	html[data-theme="clean"] #load-label { color: #6B7480; font-size: 14px; text-shadow: none; }
+	html[data-theme="clean"] #load-label::after { color: #9AA4AE; }
 	html[data-theme="clean"] #clone-modal { background: rgba(20,24,28,.4); backdrop-filter: blur(6px); }
 	html[data-theme="clean"] .modal-body { background: #fff; padding: 20px; }
 	html[data-theme="clean"] .tabs button { border: 1px solid #E4E7EA; border-radius: 8px;
@@ -543,6 +557,7 @@
 	html[data-theme="clean"] #rec-time { color: #6B7480; font-size: 13px; }
 	html[data-theme="clean"] .hint { color: #9AA4AE; font-size: 12.5px; }
 	html[data-theme="clean"] .msg { border: 0; border-radius: 8px; font-size: 13.5px; background: #F6F7F8; }
+	html[data-theme="clean"] .msg.busy { background: #F9F2E2; color: #8A6215; }
 	html[data-theme="clean"] .msg.err { background: #FBEDEC; color: #B3392F; }
 	html[data-theme="clean"] .msg.warn { background: #F9F2E2; color: #8A6215; }
 	html[data-theme="clean"] .msg.ok { background: #EAF4EE; color: #23843F; }
@@ -572,7 +587,12 @@
 	html[data-theme="clean"] .writeup .bottom-source { color: #6B7480; }
 	html[data-theme="clean"] .writeup .demo-video { border: 1px solid #E4E7EA; border-radius: 8px;
 		background: #000; }
-	html[data-theme="clean"] .writeup a { color: #1C2024; }
+	html[data-theme="clean"] .writeup a { color: #1C2024; text-decoration-color: #9AA4AE;
+		text-underline-offset: .18em; }
+	html[data-theme="clean"] .writeup a:hover { color: #000; background: #EEF1F3;
+		text-decoration-color: #1C2024; box-shadow: none; }
+	html[data-theme="clean"] .writeup a:focus-visible { outline: 2px solid #1C2024;
+		outline-offset: 3px; background: #EEF1F3; }
 	html[data-theme="clean"] .writeup strong { color: #1C2024; font-weight: 700; text-shadow: none; }
 	html[data-theme="clean"] .writeup table { border: 0; background: transparent; font-size: 14.5px; }
 	html[data-theme="clean"] .writeup th { font: 700 11.5px/1.6 inherit; color: #6B7480; }
@@ -800,8 +820,7 @@ Nevermore...</textarea>
 				In the past few weeks I have been working on a realtime conversational AI system.
 				The goal is to have a "creature" that can follow complex multi-step instructions,
 				carry a complex internal emotional state, interact with you and the world, and
-				connect on an emotional level. A disembodied robot of sorts. Or a
-				dis-embodied-buddy.
+				connect on an emotional level. A disembodied robot of sorts.
 			</p>
 			<p>
 				Such an undertaking requires low-latency speech, ideally response times below
@@ -810,7 +829,8 @@ Nevermore...</textarea>
 			<p class="dim">[video of a demo]</p>
 			<p>
 				Along the way there were a lot of optimizations, detours, and dead ends. Some
-				of the most useful work landed in STT and TTS. I decided to start open-sourcing
+				of the most useful work landed in STT and TTS (it&rsquo;s hard enough to make LLMs
+				run fast enough so any ms we can chop off elsewhere counts). I decided to start open-sourcing
 				pieces of the system before unveiling the companion itself. Today I am
 				releasing one of these pieces :)
 			</p>
@@ -823,10 +843,10 @@ Nevermore...</textarea>
 				impressive, but Python is not where I wanted the real-time game loop to wait
 				for audio. <a href="https://github.com/VolgaGerm/PocketTTS.cpp" target="_blank" rel="noopener">VolgaGerm&rsquo;s PocketTTS.cpp</a>
 				port moved the model to ONNX Runtime and C++, and was already fast enough to
-				be exciting: roughly 9.2x realtime on a Ryzen 7 3800X.
+				be exciting, but I noticed there was a lot of leading silence muddying the final experience.
 			</p>
 			<p>
-				I wanted to see how far it could go without changing voice quality. On my
+				I wanted to see how far I could trim without changing voice quality. On my
 				MacBook M4 Max, this optimized native version reaches roughly <strong>32-33x
 				realtime</strong>, with a first usable audio chunk around <strong>30ms</strong>
 				on this benchmark text, all on the CPU (3 ar and 2 decode threads).
@@ -849,7 +869,7 @@ Nevermore...</textarea>
 						model to the table, make PocketTTS more accurate, or add some magical new
 						capability. It just makes it faster.<br>
 						Turns out AI agents are surprisingly efficient at that kind of work. You can
-						set concrete goals and let them ruminate, running around in circles, until
+						set concrete goals, draft investigation plans and let them ruminate, running around in circles, until
 						they eventually exhaust many of the possible paths.
 					</p>
 					<p>
@@ -898,7 +918,7 @@ Nevermore...</textarea>
 				the WASM version can be as fast as, or faster than, the clean native C++
 				version. The payload is about <strong>67MB</strong>, it supports voice cloning, and it runs locally.
 				Maybe it can be useful as a library, or a reference, for someone building
-				apps or games, or just tinkering with something that requires TTS.
+				apps or games, or just tinkering with something that requires TTS. Make some cool!
 			</p>
 			<p>
 				Thanks a lot for reading. I&rsquo;ll be releasing the next parts of the project soon,
@@ -957,7 +977,7 @@ Nevermore...</textarea>
 		<div id="clone-report"></div>
 
 		<div class="row">
-			<input id="clone-name" placeholder="Name this voice">
+			<input id="clone-name" placeholder="Name this voice" maxlength="24">
 		</div>
 		<div class="modal-foot">
 			<button id="clone-close" class="ghost">Cancel</button>

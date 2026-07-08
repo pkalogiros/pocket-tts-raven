@@ -655,7 +655,7 @@ function syncVoiceDownloadButton () {
 		function close () {
 			if (!isOpen ()) return;
 			if (cloneBusy) {
-				setReportMessage ('', 'Voice cloning is still running…');
+				setReportMessage ('busy', 'Voice cloning is still running');
 				return;
 			}
 			el ('clone-modal').classList.remove ('show');
@@ -719,11 +719,14 @@ function syncVoiceDownloadButton () {
 		if (e.key !== 'Escape' || e.defaultPrevented || !isOpen ()) return;
 		e.preventDefault ();
 		close ();
-	});
-		el ('tab-file').onclick = function () { if (!cloneBusy) tab ('file'); };
-		el ('tab-mic').onclick = function () { if (!cloneBusy) tab ('mic'); };
+		});
+			el ('tab-file').onclick = function () { if (!cloneBusy) tab ('file'); };
+			el ('tab-mic').onclick = function () { if (!cloneBusy) tab ('mic'); };
+			el ('clone-name').addEventListener ('input', function () {
+				if (this.value.length > 24) this.value = this.value.slice (0, 24);
+			});
 
-		function report (r, sourceLabel) {
+			function report (r, sourceLabel) {
 			clearReport ();
 			r.errors.forEach (function (m) { addReportMessage ('err', m); });
 			r.warnings.forEach (function (m) { addReportMessage ('warn', m); });
@@ -935,13 +938,13 @@ function syncVoiceDownloadButton () {
 		el ('record').classList.remove ('recording');
 		el ('tab-file').disabled = false;
 		if (!isOpen ()) return;
-		app.resampleRaw (r.audio, r.sampleRate).then (function (audio) {
-			if (!isOpen ()) return;
-			var leveled = app.levelMobileMicForClone ? app.levelMobileMicForClone (audio) : { audio: audio, gain: 1 };
-			var label = leveled.gain > 1 ? 'Microphone recording — mobile level normalized' : 'Microphone recording';
-			accept (leveled.audio, label);
+			app.resampleRaw (r.audio, r.sampleRate).then (function (audio) {
+				if (!isOpen () || cloneBusy) return;
+				var leveled = app.levelMobileMicForClone ? app.levelMobileMicForClone (audio) : { audio: audio, gain: 1 };
+				var label = leveled.gain > 1 ? 'Microphone recording — mobile level normalized' : 'Microphone recording';
+				showClip (leveled.audio, label);
+			});
 		});
-	});
 		app.listenFor ('RecordError', function (msg) {
 			if (!isOpen ()) return;
 			setReportMessage ('err', 'Microphone unavailable: ' + msg);
@@ -949,10 +952,10 @@ function syncVoiceDownloadButton () {
 
 		el ('clone-confirm').onclick = function () {
 			if (cloneBusy || !pending) return;
-				var label = el ('clone-name').value.trim () || ('My voice ' + (app.state.voices.length));
+				var label = (el ('clone-name').value.trim () || ('My voice ' + (app.state.voices.length))).slice (0, 24);
 				var key = 'clone-' + Date.now ().toString (36);
 				activeCloneKey = key;
-				setReportMessage ('', 'Cloning… first time loads the voice encoder (~40MB).');
+				setReportMessage ('busy', 'Cloning - first time loads the voice encoder (~40MB)');
 				setCloneBusy (true);
 			if (cloneReadyListener) app.stopListening ('VoiceReady', cloneReadyListener);
 			var doneOnce = cloneReadyListener = app.listenFor ('VoiceReady', function (v) {
@@ -983,9 +986,9 @@ function syncVoiceDownloadButton () {
 
 			app.listenFor ('EngineProgress', function (p) {
 				if (el ('clone-modal').classList.contains ('show')) {
-					setReportMessage ('', p.label + '…');
-			}
-		});
+					setReportMessage (cloneBusy ? 'busy' : '', p.label);
+				}
+			});
 })();
 
 })(window, document, window.PKTTS);
