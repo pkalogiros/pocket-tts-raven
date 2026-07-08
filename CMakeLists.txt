@@ -76,10 +76,16 @@ set(ONNXRUNTIME_ROOT ${onnxruntime_SOURCE_DIR})
 set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib)
+    set(ONNXRUNTIME_RUNTIME_LIBS ${ONNXRUNTIME_ROOT}/lib/onnxruntime.dll)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.dylib)
+    file(GLOB ONNXRUNTIME_RUNTIME_LIBS "${ONNXRUNTIME_ROOT}/lib/libonnxruntime*.dylib")
 else()
     set(ONNXRUNTIME_LIB ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so)
+    file(GLOB ONNXRUNTIME_RUNTIME_LIBS "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so*")
+endif()
+if(NOT ONNXRUNTIME_RUNTIME_LIBS)
+    set(ONNXRUNTIME_RUNTIME_LIBS ${ONNXRUNTIME_LIB})
 endif()
 
 # SentencePiece (static library only) - https://github.com/google/sentencepiece/releases
@@ -165,12 +171,12 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     add_custom_command(TARGET pocket-tts POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${ONNXRUNTIME_ROOT}/lib/onnxruntime.dll
+            ${ONNXRUNTIME_RUNTIME_LIBS}
             $<TARGET_FILE_DIR:pocket-tts>
     )
 else()
     add_custom_command(TARGET pocket-tts POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ONNXRUNTIME_LIB} $<TARGET_FILE_DIR:pocket-tts>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ONNXRUNTIME_RUNTIME_LIBS} $<TARGET_FILE_DIR:pocket-tts>
     )
 endif()
 
@@ -187,23 +193,36 @@ endif()
 # Shared library (for FFI from Deno/Python)
 # Build with: cmake -B .build -DBUILD_SHARED_LIB=ON
 if(BUILD_SHARED_LIB)
+    set(PTT_SHARED_RPATH "$ORIGIN")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(PTT_SHARED_RPATH "@loader_path")
+    endif()
+
     add_library(pocket-tts-lib SHARED src/pocket_tts.cpp)
     set_target_properties(pocket-tts-lib PROPERTIES
         OUTPUT_NAME "pocket_tts"
-        BUILD_RPATH "$ORIGIN"
-        INSTALL_RPATH "$ORIGIN"
+        BUILD_RPATH "${PTT_SHARED_RPATH}"
+        INSTALL_RPATH "${PTT_SHARED_RPATH}"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
 
     target_compile_definitions(pocket-tts-lib PRIVATE PTT_SHARED_LIB)
 
-    # Link against the unversioned .so directly and override the SONAME dependency
-    # so it looks for libonnxruntime.so (what we ship) not libonnxruntime.so.1
-    target_link_libraries(pocket-tts-lib PRIVATE
-        -l:libonnxruntime.so
-        sentencepiece-static
-    )
-    target_link_directories(pocket-tts-lib PRIVATE ${ONNXRUNTIME_ROOT}/lib)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Link against the unversioned .so directly and override the SONAME
+        # dependency so it looks for libonnxruntime.so, which is what we ship
+        # beside the FFI library.
+        target_link_libraries(pocket-tts-lib PRIVATE
+            -l:libonnxruntime.so
+            sentencepiece-static
+        )
+        target_link_directories(pocket-tts-lib PRIVATE ${ONNXRUNTIME_ROOT}/lib)
+    else()
+        target_link_libraries(pocket-tts-lib PRIVATE
+            ${ONNXRUNTIME_LIB}
+            sentencepiece-static
+        )
+    endif()
 
     target_include_directories(pocket-tts-lib PRIVATE
         ${ONNXRUNTIME_INCLUDE_DIR}
@@ -222,12 +241,12 @@ if(BUILD_SHARED_LIB)
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         add_custom_command(TARGET pocket-tts-lib POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${ONNXRUNTIME_ROOT}/lib/onnxruntime.dll
+                ${ONNXRUNTIME_RUNTIME_LIBS}
                 $<TARGET_FILE_DIR:pocket-tts-lib>
         )
-    else()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_custom_command(TARGET pocket-tts-lib POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ONNXRUNTIME_LIB} $<TARGET_FILE_DIR:pocket-tts-lib>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ONNXRUNTIME_RUNTIME_LIBS} $<TARGET_FILE_DIR:pocket-tts-lib>
         )
         find_program(PATCHELF patchelf)
         if(PATCHELF)
@@ -236,6 +255,10 @@ if(BUILD_SHARED_LIB)
                 COMMENT "Patching libonnxruntime SONAME dependency"
             )
         endif()
+    else()
+        add_custom_command(TARGET pocket-tts-lib POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ONNXRUNTIME_RUNTIME_LIBS} $<TARGET_FILE_DIR:pocket-tts-lib>
+        )
     endif()
 endif()
 
