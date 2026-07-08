@@ -66,7 +66,10 @@ function copyBuffer (buf) {
 
 	worker.onerror = function (e) {
 		// a wasm OOM abort kills the module irrecoverably - say so plainly
+		var failedCloneKey = cloneInFlightKey;
+		cloneInFlightKey = null;
 		app.fireEvent ('EngineError', { during: 'engine',
+			key: failedCloneKey,
 			message: (e && e.message) || 'engine crashed - reload the page' });
 	};
 	worker.onmessage = function (e) {
@@ -81,13 +84,14 @@ function copyBuffer (buf) {
 					  (d.spin === 0 ? ' · nospin' : '')
 					: engine;
 				app.fireEvent ('EngineProgress', { label: 'Preparing voices', pct: 0.98 });
-					worker.postMessage ({ type: 'loadPresets', presets: [
-						{ key: 'alba', label: 'ALBA',
-						  url: assetUrl ('presets/alba.emb') }
-					]});
+				worker.postMessage ({ type: 'loadPresets', presets: [
+					{ key: 'alba', label: 'ALBA',
+					  url: assetUrl ('presets/alba.emb') }
+				]});
 				app.fireEvent ('VoicesRestoreRequest');
 				break;
 			case 'voice':
+				if (cloneInFlightKey && d.key === cloneInFlightKey) cloneInFlightKey = null;
 				app.state.ready = true;
 				app.fireEvent ('VoiceReady', d);
 				app.fireEvent ('EngineReady');
@@ -111,12 +115,19 @@ function copyBuffer (buf) {
 					d.pool + ', variant=' + d.variant);
 				app.fireEvent ('EngineBench', d);
 				break;
-			case 'error':        app.fireEvent ('EngineError', d); break;
+			case 'error':
+				if (cloneInFlightKey && d.during === 'clone') {
+					d.key = cloneInFlightKey;
+					cloneInFlightKey = null;
+				}
+				app.fireEvent ('EngineError', d);
+				break;
 		}
 	};
 
 	var prewarmSent = false;
 	var shuttingDown = false;
+	var cloneInFlightKey = null;
 	function shutdownPage (event) {
 		if (event && event.persisted) return;
 		if (shuttingDown) return;
@@ -151,9 +162,20 @@ function copyBuffer (buf) {
 	});
 	app.listenFor ('CloneRequest', function (req) {
 		if (shuttingDown) return;
-		var copy = req.audio.slice ();
-		worker.postMessage ({ type: 'clone', key: req.key, label: req.label, audio: copy },
-			[ copy.buffer ]);
+		if (cloneInFlightKey) {
+			app.fireEvent ('EngineProgress', { label: 'Voice cloning is already running', pct: 0.5 });
+			return;
+		}
+		cloneInFlightKey = req.key;
+		try {
+			var copy = req.audio.slice ();
+			worker.postMessage ({ type: 'clone', key: req.key, label: req.label, audio: copy },
+				[ copy.buffer ]);
+		} catch (err) {
+			cloneInFlightKey = null;
+			app.fireEvent ('EngineError', { during: 'clone', key: req.key,
+				message: String (err && err.message || err) });
+		}
 	});
 	app.listenFor ('VoiceRestore', function (v) {
 		if (shuttingDown) return;
@@ -562,7 +584,7 @@ function copyBuffer (buf) {
 		var dur = n / SR;
 		var errors = [], warnings = [];
 		if (dur < 6) errors.push ('Too short — record at least 6 seconds (10–15s works best).');
-		if (dur > 15) warnings.push ('Longer than 15s — only the first 15 seconds are used (trim to choose which).');
+		if (dur > 10) warnings.push ('Longer than 10s — only the first 10 seconds are used (trim to choose which).');
 
 		var sumSq = 0, clipped = 0, peak = 0;
 		for (i = 0; i < n; ++i) {

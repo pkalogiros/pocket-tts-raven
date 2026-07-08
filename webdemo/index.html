@@ -831,12 +831,12 @@ Nevermore...</textarea>
 				realtime</strong>, with a first usable audio chunk around <strong>30ms</strong>
 				on this benchmark text, all on the CPU (3 ar and 2 decode threads).
 			</p>
-			<p class="dim"><em>(own local benchmarks)</em></p>
+			<p class="dim"><em>(own local benchmarks, warm)</em></p>
 			<table>
 				<tr><th>Stage</th><th>What changed</th><th>Result</th></tr>
-				<tr><td>Python Pocket TTS</td><td>Original Python/PyTorch model</td><td class="num">4.8x realtime, 210ms first useful audio</td></tr>
-				<tr><td>PocketTTS.cpp</td><td>Clean ONNX Runtime + C++ port</td><td class="num">11.4x realtime, 120ms first useful audio</td></tr>
-				<tr><td><strong>Optimized native path (ours)</strong></td><td>Graph rewrites, cache deltas, fused decoder work</td><td class="num">32.5x realtime, 30ms first useful audio</td></tr>
+				<tr><td>Python Pocket TTS</td><td>Original Python/PyTorch model</td><td class="num">8.7x realtime, 210ms first useful audio</td></tr>
+				<tr><td>PocketTTS.cpp</td><td>Clean ONNX Runtime + C++ port</td><td class="num">22.4x realtime, 120ms first useful audio</td></tr>
+				<tr><td><strong>Optimized native path (ours)</strong></td><td>Graph rewrites, cache deltas, fused decoder work</td><td class="num">33.3x realtime, 30ms first useful audio</td></tr>
 				<tr><td><strong>Browser build (ours)</strong></td><td>WASM SIMD, threads, streaming playback, voice cloning</td><td class="num">up to ~14x realtime on M4 Max, ~4x on iPhone 16 Pro</td></tr>
 			</table>
 			<p class="dim">Native numbers are warm medians on a MacBook M4 Max using the page text and the Alba voice (3 threads). On different systems performance might vary.</p>

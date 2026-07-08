@@ -8,7 +8,7 @@ A heavily optimized runtime for [Kyutai's Pocket TTS](https://github.com/kyutai-
 
 |                       | speed          | first audio | notes |
 |-----------------------|----------------|-------------|-------|
-| **Native** (M4 Max)   | ~32x realtime  | ~25 ms      | no Python, no GPU, no frameworks |
+| **Native** (M4 Max)   | ~33x realtime  | ~30 ms      | no Python, no GPU, no frameworks |
 | **Browser** (desktop) | ~14x realtime  | ~70 ms      | WASM + SIMD + threads |
 | **Browser** (iPhone)  | ~3–4x realtime | <250ms      | same build |
 

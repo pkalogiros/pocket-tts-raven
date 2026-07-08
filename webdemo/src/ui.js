@@ -567,21 +567,11 @@ function syncVoiceDownloadButton () {
 
 // ── AudioMass fullscreen modal ──────────────────────────────────────────────
 (function () {
-	var loaded = false, ready = false, queued = null, checked = null;
+	var loaded = false, ready = false, queued = null;
 
 	function frame () { return el ('am-frame'); }
 	function send (buf) {
-		var win = frame ().contentWindow;
-		if (win) win.postMessage ({ pkttsWav: buf, name: 'pocket-tts.wav' }, '*');
-	}
-
-	function available () {
-		if (!checked) {
-			checked = fetch ('audiomass/index.html', { method: 'HEAD', cache: 'no-store' })
-				.then (function (res) { return !!(res && res.ok); })
-				.catch (function () { return false; });
-		}
-		return checked;
+		frame ().contentWindow.postMessage ({ pkttsWav: buf, name: 'pocket-tts.wav' }, '*');
 	}
 
 	w.addEventListener ('message', function (ev) {
@@ -601,22 +591,16 @@ function syncVoiceDownloadButton () {
 	}
 
 	function openWith (buf, forClone) {
-		available ().then (function (ok) {
-			if (!ok) {
-				toast ('AudioMass is optional. Install it in webdemo/audiomass/ to enable editing.', 5000);
-				return;
-			}
-			el ('am-use').style.display = forClone ? '' : 'none';
-			el ('am-modal').classList.add ('show');
-			if (!loaded) {
-				loaded = true;
-				queued = buf;
-				frame ().src = 'audiomass/index.html?skipintro=1';
-			}
-			else if (ready) send (buf);
-			else queued = buf;
-			setTimeout (focusEditor, 60);
-		});
+		el ('am-use').style.display = forClone ? '' : 'none';
+		el ('am-modal').classList.add ('show');
+		if (!loaded) {
+			loaded = true;
+			queued = buf;
+			frame ().src = 'audiomass/index.html?skipintro=1';
+		}
+		else if (ready) send (buf);
+		else queued = buf;
+		setTimeout (focusEditor, 60);
 	}
 	app.listenFor ('AudioMassOpen', function (buf) { openWith (buf, false); });
 	app.listenFor ('AudioMassOpenForClone', function (buf) { openWith (buf, true); });
@@ -626,15 +610,14 @@ function syncVoiceDownloadButton () {
 	var amUse = el ('am-use');
 	if (amUse) amUse.onclick = function () {
 		try {
-			var pk = frame ().contentWindow && frame ().contentWindow.PKAudioEditor;
-			var ws = pk && pk.engine && pk.engine.wavesurfer;
-			if (!ws || !ws.backend || !ws.backend.buffer) throw new Error ('AudioMass editor is not ready');
+			var ws = frame ().contentWindow.PKAudioEditor.engine.wavesurfer;
 			var b = ws.backend.buffer;
 			var mono = new Float32Array (b.getChannelData (0)); // copy out of the iframe
 			app.resampleRaw (mono, b.sampleRate).then (function (audio24k) {
 				app.fireEvent ('CloneSourceEdited', audio24k);
 			});
 			el ('am-modal').classList.remove ('show');
+			var pk = frame ().contentWindow.PKAudioEditor;
 			if (pk && pk.fireEvent) pk.fireEvent ('RequestPause');
 		} catch (e) {
 			toast ('Could not read the edited audio back — use File > Export instead.', 5000);
@@ -646,8 +629,7 @@ function syncVoiceDownloadButton () {
 		// Pause any playback inside AudioMass (same-origin iframe, so we can
 		// speak its event bus directly); the session itself stays alive.
 		try {
-			var win = frame ().contentWindow;
-			var pk = win && win.PKAudioEditor;
+			var pk = frame ().contentWindow.PKAudioEditor;
 			if (pk && pk.fireEvent) pk.fireEvent ('RequestPause');
 		} catch (e) { /* editor not booted yet */ }
 	}
@@ -661,24 +643,41 @@ function syncVoiceDownloadButton () {
 })();
 
 // ── Clone modal ─────────────────────────────────────────────────────────────
-(function () {
-	var pending = null; // validated 24k audio awaiting confirm
-	var recTimer = null;
+	(function () {
+		var pending = null; // validated 24k audio awaiting confirm
+		var recTimer = null;
+		var cloneBusy = false;
+		var activeCloneKey = null;
+		var cloneReadyListener = null;
 
-	function isOpen () { return el ('clone-modal').classList.contains ('show'); }
-	function open () { el ('clone-modal').classList.add ('show'); tab ('file'); reset (); }
-	function close () {
-		if (!isOpen ()) return;
-		el ('clone-modal').classList.remove ('show');
-		app.fireEvent ('RecordStop');
-		reset ();
-	}
-		function reset () {
-			pending = null;
-			clipAudio = null;
-			el ('clip-preview').style.display = 'none';
-			clearReport ();
-			el ('clone-confirm').disabled = true;
+		function isOpen () { return el ('clone-modal').classList.contains ('show'); }
+		function open () { el ('clone-modal').classList.add ('show'); tab ('file'); reset (); }
+		function close () {
+			if (!isOpen ()) return;
+			if (cloneBusy) {
+				setReportMessage ('', 'Voice cloning is still running…');
+				return;
+			}
+			el ('clone-modal').classList.remove ('show');
+			app.fireEvent ('RecordStop');
+			reset ();
+		}
+		function setCloneBusy (on) {
+			cloneBusy = !!on;
+			['clone-close', 'tab-file', 'tab-mic', 'file-input', 'record', 'clip-edit', 'clone-name']
+				.forEach (function (id) {
+					var node = el (id);
+					if (node) node.disabled = cloneBusy;
+				});
+			el ('clone-x').setAttribute ('aria-disabled', cloneBusy ? 'true' : 'false');
+			el ('clone-confirm').disabled = cloneBusy || !pending;
+		}
+			function reset () {
+				pending = null;
+				clipAudio = null;
+				el ('clip-preview').style.display = 'none';
+				clearReport ();
+				el ('clone-confirm').disabled = true;
 			el ('rec-time').textContent = '0.0s';
 			el ('rec-bar').style.width = '0%';
 		el ('record').textContent = 'Start recording';
@@ -721,8 +720,8 @@ function syncVoiceDownloadButton () {
 		e.preventDefault ();
 		close ();
 	});
-	el ('tab-file').onclick = function () { tab ('file'); };
-	el ('tab-mic').onclick = function () { tab ('mic'); };
+		el ('tab-file').onclick = function () { if (!cloneBusy) tab ('file'); };
+		el ('tab-mic').onclick = function () { if (!cloneBusy) tab ('mic'); };
 
 		function report (r, sourceLabel) {
 			clearReport ();
@@ -732,13 +731,14 @@ function syncVoiceDownloadButton () {
 				addReportMessage ('ok', sourceLabel + ' — ' + r.stats.duration.toFixed (1) +
 					's of audio, ready to clone.');
 			}
-			el ('clone-confirm').disabled = !r.ok;
+			el ('clone-confirm').disabled = cloneBusy || !r.ok;
 		}
 
-	function accept (audio24k, label) {
-		var r = app.validateVoice (audio24k);
-		pending = r.ok ? audio24k : null;
-		report (r, label);
+		function accept (audio24k, label) {
+			if (cloneBusy) return;
+			var r = app.validateVoice (audio24k);
+			pending = r.ok ? audio24k : null;
+			report (r, label);
 	}
 
 	// ── clip preview: waveform + draggable trim region ──────────────────
@@ -804,11 +804,12 @@ function syncVoiceDownloadButton () {
 	}
 	// handle dragging (pointer events cover touch)
 	['l', 'r'].forEach (function (side) {
-		var h = el ('clip-handle-' + side);
-		if (!h) return;
-		h.addEventListener ('pointerdown', function (ev) {
-			ev.preventDefault ();
-			h.setPointerCapture (ev.pointerId);
+			var h = el ('clip-handle-' + side);
+			if (!h) return;
+			h.addEventListener ('pointerdown', function (ev) {
+				if (cloneBusy) return;
+				ev.preventDefault ();
+				h.setPointerCapture (ev.pointerId);
 			var move = function (mv) {
 				var rect = el ('clip-wave').getBoundingClientRect ();
 				var f = Math.min (1, Math.max (0, (mv.clientX - rect.left) / rect.width));
@@ -827,23 +828,26 @@ function syncVoiceDownloadButton () {
 		});
 	});
 	// hand the (full) clip to AudioMass for cleanup; edited audio comes back
-	// via CloneSourceEdited
-	if (el ('clip-edit')) el ('clip-edit').onclick = function () {
-		if (!clipAudio) return;
-		app.wavBlob48k (clipAudio).then (function (b) {
+		// via CloneSourceEdited
+		if (el ('clip-edit')) el ('clip-edit').onclick = function () {
+			if (cloneBusy) return;
+			if (!clipAudio) return;
+			app.wavBlob48k (clipAudio).then (function (b) {
 			return b.arrayBuffer ();
 		}).then (function (buf) {
 			app.fireEvent ('AudioMassOpenForClone', buf);
 		});
-	};
-	app.listenFor ('CloneSourceEdited', function (audio24k) {
-		showClip (audio24k, 'Edited audio');
-		toast ('Edited audio loaded — adjust the trim if needed, then clone.', 4000);
+		};
+		app.listenFor ('CloneSourceEdited', function (audio24k) {
+			if (cloneBusy) return;
+			showClip (audio24k, 'Edited audio');
+			toast ('Edited audio loaded — adjust the trim if needed, then clone.', 4000);
 	});
 
-		// file path
-		function handleFile (file) {
-			setReportMessage ('', 'Decoding ' + file.name + '…');
+			// file path
+			function handleFile (file) {
+				if (cloneBusy) return;
+				setReportMessage ('', 'Decoding ' + file.name + '…');
 			app.decodeFile (file).then (function (buf) {
 				return app.resampleTo24k (buf);
 			}).then (function (audio) {
@@ -852,17 +856,22 @@ function syncVoiceDownloadButton () {
 				setReportMessage ('err', 'Could not decode this file (' + e + ')');
 			});
 		}
-	el ('file-input').onchange = function () {
-		if (this.files && this.files[0]) handleFile (this.files[0]);
-	};
-	var drop = el ('pane-file');
-	drop.ondragover = function (e) { e.preventDefault (); drop.classList.add ('over'); };
-	drop.ondragleave = function () { drop.classList.remove ('over'); };
-	drop.ondrop = function (e) {
-		e.preventDefault ();
-		drop.classList.remove ('over');
-		if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile (e.dataTransfer.files[0]);
-	};
+		el ('file-input').onchange = function () {
+			if (cloneBusy) return;
+			if (this.files && this.files[0]) handleFile (this.files[0]);
+		};
+		var drop = el ('pane-file');
+		drop.ondragover = function (e) {
+			e.preventDefault ();
+			if (!cloneBusy) drop.classList.add ('over');
+		};
+		drop.ondragleave = function () { drop.classList.remove ('over'); };
+		drop.ondrop = function (e) {
+			e.preventDefault ();
+			drop.classList.remove ('over');
+			if (cloneBusy) return;
+			if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile (e.dataTransfer.files[0]);
+		};
 
 	// mic path: live waveform + duration guidance (aim 5-15s)
 	var live, liveCtx;
@@ -896,8 +905,9 @@ function syncVoiceDownloadButton () {
 	}
 	var liveRing = [];
 
-	el ('record').onclick = function () {
-		if (this.classList.contains ('recording')) app.fireEvent ('RecordStop');
+		el ('record').onclick = function () {
+			if (cloneBusy) return;
+			if (this.classList.contains ('recording')) app.fireEvent ('RecordStop');
 		else {
 			liveRing = [];
 			app.fireEvent ('RecordStart');
@@ -910,13 +920,13 @@ function syncVoiceDownloadButton () {
 		setTimeout (function () { el ('record').disabled = false; }, 800);
 			el ('clone-confirm').disabled = true;
 			el ('tab-file').disabled = true;
-			setReportMessage ('', 'Read a couple of sentences naturally — aim for 6–15 seconds.');
+			setReportMessage ('', 'Read a couple of sentences naturally — aim for 6–10 seconds.');
 		});
 	app.listenFor ('RecordProgress', function (p) {
 		el ('rec-time').textContent = p.seconds.toFixed (1) + 's';
 		var pct = Math.min (100, p.seconds / 15 * 100);
 		el ('rec-bar').style.width = pct + '%';
-		el ('rec-bar').className = p.seconds < 6 ? 'short' : (p.seconds <= 15 ? 'good' : 'long');
+		el ('rec-bar').className = p.seconds < 6 ? 'short' : (p.seconds <= 10 ? 'good' : 'long');
 		drawLive (p.latest);
 		if (p.seconds >= 25) app.fireEvent ('RecordStop');
 	});
@@ -937,25 +947,43 @@ function syncVoiceDownloadButton () {
 			setReportMessage ('err', 'Microphone unavailable: ' + msg);
 		});
 
-	el ('clone-confirm').onclick = function () {
-		if (!pending) return;
-			var label = el ('clone-name').value.trim () || ('My voice ' + (app.state.voices.length));
-			var key = 'clone-' + Date.now ().toString (36);
-			setReportMessage ('', 'Cloning… first time loads the voice encoder (~40MB).');
-			el ('clone-confirm').disabled = true;
-		var doneOnce = app.listenFor ('VoiceReady', function (v) {
-			if (v.key !== key) return;
-			app.stopListening ('VoiceReady', doneOnce);
-			app.state.activeVoice = key;
-			app.fireEvent ('VoiceSelected', key);
-			close ();
-		});
-		app.fireEvent ('CloneRequest', { key: key, label: label, audio: pending });
-	};
+		el ('clone-confirm').onclick = function () {
+			if (cloneBusy || !pending) return;
+				var label = el ('clone-name').value.trim () || ('My voice ' + (app.state.voices.length));
+				var key = 'clone-' + Date.now ().toString (36);
+				activeCloneKey = key;
+				setReportMessage ('', 'Cloning… first time loads the voice encoder (~40MB).');
+				setCloneBusy (true);
+			if (cloneReadyListener) app.stopListening ('VoiceReady', cloneReadyListener);
+			var doneOnce = cloneReadyListener = app.listenFor ('VoiceReady', function (v) {
+					if (v.key !== key) return;
+					app.stopListening ('VoiceReady', doneOnce);
+					cloneReadyListener = null;
+					activeCloneKey = null;
+					setCloneBusy (false);
+					app.state.activeVoice = key;
+				app.fireEvent ('VoiceSelected', key);
+				close ();
+			});
+			app.fireEvent ('CloneRequest', { key: key, label: label, audio: pending });
+		};
 
-		app.listenFor ('EngineProgress', function (p) {
-			if (el ('clone-modal').classList.contains ('show')) {
-				setReportMessage ('', p.label + '…');
+			app.listenFor ('EngineError', function (err) {
+				if (!cloneBusy || !isOpen () || !err ||
+					(err.during !== 'clone' && err.during !== 'engine') ||
+					(err.key && err.key !== activeCloneKey)) return;
+				if (cloneReadyListener) {
+					app.stopListening ('VoiceReady', cloneReadyListener);
+					cloneReadyListener = null;
+				}
+				activeCloneKey = null;
+				setCloneBusy (false);
+				setReportMessage ('err', 'Could not clone this voice (' + (err.message || err) + ')');
+			});
+
+			app.listenFor ('EngineProgress', function (p) {
+				if (el ('clone-modal').classList.contains ('show')) {
+					setReportMessage ('', p.label + '…');
 			}
 		});
 })();
