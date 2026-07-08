@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PocketTTS-RAVEN | Faster-than-realtime text-to-voice with voice cloning</title>
+<meta name="description" content="Faster-than-realtime text-to-voice with voice cloning, available as native C++ and browser WASM builds. No cloud, no GPU, no upload — your audio never leaves your machine.">
+<meta name="theme-color" content="#0B0710">
+<!-- NB: og:image must become an absolute https URL when deployed to a domain -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="PocketTTS-RAVEN">
+<meta property="og:title" content="Optimized PocketTTS clone">
+<meta property="og:description" content="M4 Max: 32x realtime on Native, 14x realtime WASM. CPU only, live WASM demo.">
+<meta property="og:image" content="/og-card.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Optimized PocketTTS clone. M4 Max: 32x realtime on Native, 14x realtime WASM. CPU only, live WASM demo.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Optimized PocketTTS clone">
+<meta name="twitter:description" content="M4 Max: 32x realtime on Native, 14x realtime WASM. CPU only, live WASM demo.">
+<meta name="twitter:image" content="/og-card.png">
+<meta name="twitter:image:alt" content="Optimized PocketTTS clone. M4 Max: 32x realtime on Native, 14x realtime WASM. CPU only, live WASM demo.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23E6DCC8'/%3E%3Crect x='7' y='1' width='3' height='1' fill='%231B1822'/%3E%3Crect x='6' y='2' width='5' height='1' fill='%231B1822'/%3E%3Crect x='5' y='3' width='7' height='1' fill='%231B1822'/%3E%3Crect x='4' y='4' width='8' height='1' fill='%231B1822'/%3E%3Crect x='3' y='5' width='9' height='1' fill='%231B1822'/%3E%3Crect x='2' y='6' width='9' height='1' fill='%23241C2C'/%3E%3Crect x='2' y='7' width='8' height='1' fill='%23241C2C'/%3E%3Crect x='3' y='8' width='7' height='1' fill='%231B1822'/%3E%3Crect x='4' y='9' width='5' height='1' fill='%231B1822'/%3E%3Crect x='5' y='10' width='4' height='1' fill='%23141119'/%3E%3Crect x='6' y='11' width='2' height='2' fill='%23141119'/%3E%3Crect x='5' y='13' width='1' height='1' fill='%234B3032'/%3E%3Crect x='8' y='13' width='1' height='1' fill='%234B3032'/%3E%3Crect x='11' y='3' width='3' height='1' fill='%23D68C45'/%3E%3Crect x='12' y='4' width='2' height='1' fill='%23A65F31'/%3E%3Crect x='9' y='3' width='1' height='1' fill='%23C41E2F'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" crossorigin="anonymous">
+<script>try{if(localStorage.getItem('pktts_theme')==='clean')document.documentElement.setAttribute('data-theme','clean')}catch(e){}</script>
+<style>
+	:root {
+		--void: #0B0710; --crypt: #17101E; --tomb: #241831; --pit: #060309;
+		--bone: #E6DCC8; --ash: #9A8FA8; --line: #3A2B4A;
+		--blood: #C41E2F; --blood-lite: #E43D4F; --blood-dk: #7A1220;
+		--phosphor: #6BFF6B; --amber: #E8B34B;
+		--lite: #4A3A5E; --dark: #05030A;
+		--px: "Press Start 2P", "Courier New", monospace;
+		--vt: "VT323", "Courier New", monospace;
+	}
+	* { box-sizing: border-box; }
+	html, body { margin: 0; min-height: 100%; color: var(--bone);
+		/* hand-pixeled gothic damask: rose, bud, thorn vine, dim stars */
+		background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect x='6' y='3' width='5' height='1' fill='%231E0810'/%3E%3Crect x='5' y='4' width='7' height='1' fill='%23260B15'/%3E%3Crect x='4' y='5' width='9' height='1' fill='%23260B15'/%3E%3Crect x='4' y='6' width='9' height='1' fill='%232E0E1B'/%3E%3Crect x='4' y='7' width='9' height='1' fill='%232E0E1B'/%3E%3Crect x='5' y='8' width='7' height='1' fill='%23260B15'/%3E%3Crect x='6' y='9' width='5' height='1' fill='%231E0810'/%3E%3Crect x='6' y='5' width='2' height='1' fill='%233A1526'/%3E%3Crect x='9' y='6' width='2' height='1' fill='%233A1526'/%3E%3Crect x='7' y='6' width='1' height='1' fill='%23160509'/%3E%3Crect x='8' y='7' width='1' height='1' fill='%23160509'/%3E%3Crect x='7' y='7' width='1' height='1' fill='%23471A2E'/%3E%3Crect x='6' y='7' width='1' height='1' fill='%23160509'/%3E%3Crect x='3' y='8' width='1' height='1' fill='%23101810'/%3E%3Crect x='2' y='9' width='1' height='1' fill='%23101810'/%3E%3Crect x='13' y='8' width='1' height='1' fill='%23101810'/%3E%3Crect x='14' y='9' width='1' height='1' fill='%23101810'/%3E%3Crect x='8' y='10' width='1' height='2' fill='%23121C12'/%3E%3Crect x='7' y='12' width='1' height='1' fill='%23121C12'/%3E%3Crect x='12' y='12' width='1' height='1' fill='%23180F20'/%3E%3Crect x='14' y='14' width='1' height='1' fill='%23180F20'/%3E%3Crect x='16' y='16' width='1' height='1' fill='%23180F20'/%3E%3Crect x='18' y='18' width='1' height='1' fill='%23180F20'/%3E%3Crect x='15' y='13' width='1' height='1' fill='%231E1429'/%3E%3Crect x='17' y='17' width='1' height='1' fill='%231E1429'/%3E%3Crect x='22' y='21' width='3' height='1' fill='%23260B15'/%3E%3Crect x='21' y='22' width='5' height='1' fill='%232E0E1B'/%3E%3Crect x='21' y='23' width='5' height='1' fill='%23260B15'/%3E%3Crect x='22' y='24' width='3' height='1' fill='%231E0810'/%3E%3Crect x='23' y='22' width='1' height='1' fill='%23471A2E'/%3E%3Crect x='20' y='25' width='1' height='1' fill='%23101810'/%3E%3Crect x='26' y='25' width='1' height='1' fill='%23101810'/%3E%3Crect x='26' y='6' width='1' height='1' fill='%23140D1C'/%3E%3Crect x='25' y='7' width='3' height='1' fill='%23140D1C'/%3E%3Crect x='26' y='8' width='1' height='1' fill='%23140D1C'/%3E%3Crect x='6' y='26' width='1' height='1' fill='%23140D1C'/%3E%3Crect x='5' y='27' width='3' height='1' fill='%23140D1C'/%3E%3Crect x='6' y='28' width='1' height='1' fill='%23140D1C'/%3E%3C/svg%3E") 0 0 / 128px 128px var(--void);
+		font: 19px/1.42 var(--vt);
+		image-rendering: pixelated;
+		-webkit-font-smoothing: none; }
+	/* CRT scanlines + vignette over everything, always beneath the pointer */
+	/* CRT glass: uniform scanlines only — a fixed vignette would read as
+	   parallax against the scrolling wallpaper */
+	body::after { content: ""; position: fixed; inset: 0; z-index: 100; pointer-events: none;
+		background: repeating-linear-gradient(180deg, rgba(0,0,0,.16) 0 1px, transparent 1px 3px); }
+	main { position: relative; max-width: 880px; margin: 0 auto; padding: 22px 20px 80px; }
+	.icon { width: 13px; height: 13px; flex: none; }
+	button { font-family: inherit; }
+	button:focus-visible, .chip:focus-visible, textarea:focus-visible, input:focus-visible {
+		outline: 2px dotted var(--phosphor); outline-offset: 2px; }
+	::selection { background: var(--blood); color: var(--bone); }
+
+	/* ── Win95 crypt chrome ─────────────────────────────────────────────── */
+	.win { border: 2px solid; border-color: var(--lite) var(--dark) var(--dark) var(--lite);
+		background: var(--crypt); box-shadow: 6px 6px 0 rgba(0,0,0,.55); }
+	.win-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+		background: linear-gradient(90deg, var(--blood-dk), #2A0A14 55%, #170611);
+		border-bottom: 2px solid var(--dark);
+		font: 10px/1.4 var(--px); color: var(--bone); letter-spacing: .04em;
+		text-shadow: 1px 1px 0 #000; }
+	.win-bar .sk { color: var(--amber); }
+	.win-bar .grow { flex: 1; }
+	.win-dots { display: inline-flex; gap: 4px; }
+	.win-dots i { width: 14px; height: 14px; display: inline-flex; align-items: center;
+		justify-content: center; font-style: normal; font: 9px/1 var(--px); color: var(--dark);
+		background: var(--bone); border: 2px solid;
+		border-color: #FFF8E8 var(--dark) var(--dark) #FFF8E8; }
+	#clone-x { cursor: pointer; }
+	#clone-x:hover { background: var(--blood-lite); color: var(--bone); }
+	#clone-x:active { border-color: var(--dark) #FFF8E8 #FFF8E8 var(--dark); }
+
+	/* ── marquee ────────────────────────────────────────────────────────── */
+	.marquee { overflow: hidden; border: 2px solid; margin: 0 0 18px;
+		border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); color: var(--phosphor);
+		font: 12px/1 var(--px); padding: 8px 0; white-space: nowrap;
+		text-shadow: 0 0 6px rgba(107,255,107,.55); }
+	.marquee span { display: inline-block; padding-left: 0; animation: crawl 26s linear infinite; }
+	@keyframes crawl { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+	/* ── hero ───────────────────────────────────────────────────────────── */
+	.hero-panel { position: relative; min-height: 158px; padding: 4px 210px 10px 0; }
+	header { display: flex; align-items: baseline; gap: 14px; margin: 2px 0 10px; }
+	h1 { font: 26px/1.15 var(--px); margin: 0; color: var(--bone); letter-spacing: 0;
+		text-shadow: 3px 3px 0 var(--blood-dk), 0 0 18px rgba(196,30,47,.35); }
+	h1 .tld { color: var(--blood-lite); }
+	.hero-line { display: block; font: 10px/1.6 var(--px); color: var(--amber);
+		letter-spacing: .08em; margin: 0 0 10px; text-transform: uppercase; }
+	.hero-line .blink { animation: blinker 1.1s steps(2, start) infinite; color: var(--phosphor); }
+	@keyframes blinker { to { visibility: hidden; } }
+	.tagline { color: var(--ash); font-size: 20px; max-width: 600px; margin: 0 0 14px; }
+	.raven-stage { position: absolute; right: 0; top: 6px; width: 190px; height: 158px;
+		pointer-events: none; user-select: none; }
+	.raven-stage::before { content: ""; position: absolute; right: 20px; top: 10px;
+		width: 74px; height: 74px; background: #E6DCC8;
+		box-shadow: 0 0 0 4px #241831, 0 0 34px rgba(230,220,200,.28);
+		clip-path: polygon(0 25%, 25% 25%, 25% 0, 75% 0, 75% 25%, 100% 25%, 100% 75%, 75% 75%, 75% 100%, 25% 100%, 25% 75%, 0 75%); }
+	.raven-stage::after { content: ""; position: absolute; right: 1px; bottom: 21px; width: 154px; height: 7px;
+		background: linear-gradient(90deg, transparent 0 4px, #2E2138 5px 100%);
+		box-shadow: 38px -8px 0 -3px #2E2138, 88px -17px 0 -3px #2E2138;
+		transform: rotate(-4deg); transform-origin: right center; }
+	.pixel-raven { position: absolute; right: 35px; top: 26px; width: 112px; height: 112px;
+		image-rendering: pixelated; filter: drop-shadow(0 12px 14px rgba(0,0,0,.6));
+		pointer-events: auto; cursor: pointer; }
+	.pixel-raven.hop { animation: raven-hop .5s steps(6, end); }
+	@keyframes raven-hop {
+		0% { transform: translateY(0); }
+		38% { transform: translateY(-20px); }
+		62% { transform: translateY(-14px); }
+		100% { transform: translateY(0); }
+	}
+	.pixel-raven rect { shape-rendering: crispEdges; }
+	.pixel-raven .raven-eye { animation: raven-blink 5.2s steps(1, end) infinite; fill: var(--blood-lite); }
+	@keyframes raven-blink { 0%, 91%, 96%, 100% { opacity: 1; } 92%, 95% { opacity: 0; } }
+	.raven-caption { position: absolute; right: 4px; bottom: 0; color: var(--ash);
+		font: 9px/1 var(--px); letter-spacing: .1em; text-transform: uppercase; }
+
+	.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+		margin: 26px 0 14px; color: var(--ash); font-size: 18px; }
+	.steps span { display: inline-flex; align-items: center; min-width: 0; padding: 4px 0;
+		white-space: nowrap; border: 0; border-bottom: 1px dashed var(--line);
+		background: transparent; }
+	.steps span b { display: inline-flex; width: 20px; height: 20px;
+		background: var(--blood); color: var(--bone); font: 10px/1 var(--px);
+		align-items: center; justify-content: center; margin-right: 9px; flex: none;
+		border: 2px solid; border-color: var(--blood-lite) var(--blood-dk) var(--blood-dk) var(--blood-lite); }
+
+	/* ── the app window ─────────────────────────────────────────────────── */
+	.card { position: relative; background: var(--crypt); padding: 16px;
+		display: flex; flex-direction: column; gap: 15px; }
+
+	#voices { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+		padding: 8px; border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); }
+	.chip { border: 2px solid; border-color: var(--lite) var(--dark) var(--dark) var(--lite);
+		background: var(--tomb); color: var(--bone);
+		min-height: 36px; padding: 7px 12px; font: 17px/1 var(--vt); cursor: pointer;
+		display: inline-flex; align-items: center; gap: 8px; }
+	.chip:hover { background: #2C1E3C; }
+	.chip.active { border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); color: var(--phosphor);
+		text-shadow: 0 0 6px rgba(107,255,107,.5); }
+	.chip.add { border-style: dashed; border-color: var(--line); background: transparent; color: var(--amber); }
+	.chip.add:hover { background: rgba(232,179,75,.07); border-color: var(--amber); }
+	.chip:active { border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	.chip .tag { font: 8px/1 var(--px); text-transform: uppercase; color: var(--ash); }
+	.chip .x { font-size: 17px; line-height: 1; opacity: .55; padding: 0 1px; }
+	.chip .x:hover { opacity: 1; color: var(--blood-lite); }
+
+	textarea { width: 100%; min-height: 320px; resize: vertical;
+		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		padding: 13px 15px; font: 19px/1.4 var(--vt); color: var(--phosphor);
+		background: var(--pit); caret-color: var(--phosphor);
+		text-shadow: 0 0 5px rgba(107,255,107,.28); }
+	textarea:focus { outline: none; border-color: var(--dark) var(--blood) var(--blood) var(--dark); }
+	/* Win95 scrollbar: dithered track, beveled thumb, pixel-arrow buttons.
+	   NB: scrollbar-color must ONLY apply where ::-webkit-scrollbar is
+	   unsupported (Firefox) — modern Chrome disables custom webkit scrollbar
+	   styling entirely when the standard property is set. */
+	@supports not selector(::-webkit-scrollbar) {
+		html:not([data-theme="clean"]) textarea { scrollbar-width: auto; scrollbar-color: var(--tomb) var(--pit); }
+	}
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar { width: 18px; cursor: default; }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-track { cursor: default; }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-thumb { cursor: default; }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-button { cursor: default; }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-track {
+		background:
+			url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='2' height='2' fill='%23060309'/%3E%3Crect width='1' height='1' fill='%23191026'/%3E%3Crect x='1' y='1' width='1' height='1' fill='%23191026'/%3E%3C/svg%3E");
+		border-left: 2px solid var(--dark); }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-thumb {
+		background: var(--tomb); border: 2px solid;
+		border-color: var(--lite) var(--dark) var(--dark) var(--lite); }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-thumb:hover { background: #2C1E3C; }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-button:single-button {
+		height: 18px; background-color: var(--tomb); border: 2px solid;
+		border-color: var(--lite) var(--dark) var(--dark) var(--lite);
+		background-repeat: no-repeat; background-position: center; }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-button:single-button:active {
+		border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-button:single-button:vertical:decrement {
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Crect x='3' y='0' width='2' height='1' fill='%23E6DCC8'/%3E%3Crect x='2' y='1' width='4' height='1' fill='%23E6DCC8'/%3E%3Crect x='1' y='2' width='6' height='1' fill='%23E6DCC8'/%3E%3Crect x='0' y='3' width='8' height='1' fill='%23E6DCC8'/%3E%3C/svg%3E"); }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-button:single-button:vertical:increment {
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Crect x='0' y='0' width='8' height='1' fill='%23E6DCC8'/%3E%3Crect x='1' y='1' width='6' height='1' fill='%23E6DCC8'/%3E%3Crect x='2' y='2' width='4' height='1' fill='%23E6DCC8'/%3E%3Crect x='3' y='3' width='2' height='1' fill='%23E6DCC8'/%3E%3C/svg%3E"); }
+	html:not([data-theme="clean"]) textarea::-webkit-scrollbar-corner { background: var(--tomb); }
+
+	.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+	#mute-hint { display: none; }
+	.control-row { display: flex; align-items: flex-end; justify-content: space-between;
+		gap: 18px; }
+	.params { display: flex; align-items: center; gap: 10px; }
+	.params label { font: 10px/1.6 var(--px); color: var(--ash); text-transform: uppercase; }
+	.params .hint { display: none; }
+	#temp-val { font: 12px/1 var(--px); color: var(--amber); min-width: 46px; }
+	input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 6px;
+		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); cursor: pointer; }
+	input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+		width: 15px; height: 15px; background: var(--bone);
+		border: 2px solid; border-color: #FFF8E8 var(--dark) var(--dark) #FFF8E8; }
+	input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 0;
+		background: var(--bone); border: 2px solid var(--dark); }
+	.grow { flex: 1; }
+	#status { color: var(--phosphor); font-size: 18px; font-variant-numeric: tabular-nums;
+		display: inline-flex; align-items: center; min-height: 30px;
+		text-shadow: 0 0 6px rgba(107,255,107,.4); }
+	#status::before { content: "►"; margin-right: 9px; font-size: 12px; color: var(--blood-lite); }
+	#status::after { content: "▮"; margin-left: 4px; animation: blinker 1.1s steps(2, start) infinite; }
+
+	button.primary { min-height: 46px; background: linear-gradient(180deg, var(--blood), var(--blood-dk));
+		color: var(--bone); padding: 12px 30px; cursor: pointer;
+		border: 2px solid; border-color: var(--blood-lite) var(--dark) var(--dark) var(--blood-lite);
+		font: 13px/1 var(--px); text-transform: uppercase; letter-spacing: .06em;
+		text-shadow: 1px 1px 0 #000; }
+	button.primary:hover:not(:disabled) { background: linear-gradient(180deg, var(--blood-lite), var(--blood)); }
+	button.primary:active:not(:disabled) { border-color: var(--dark) var(--blood-lite) var(--blood-lite) var(--dark);
+		background: var(--blood-dk); }
+	button.primary:disabled { background: var(--tomb); color: var(--ash); cursor: default;
+		border-color: var(--lite) var(--dark) var(--dark) var(--lite); text-shadow: none; }
+	.control-row button.primary { min-width: 168px; }
+	button.ghost { background: var(--tomb); border: 2px solid;
+		border-color: var(--lite) var(--dark) var(--dark) var(--lite); color: var(--bone);
+		padding: 8px 10px; font: 15px/1 var(--vt); cursor: pointer;
+		display: inline-flex; align-items: center; gap: 6px; }
+	button.ghost:hover { background: #2C1E3C; color: var(--amber); }
+	button.ghost:active { border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	button.ghost[hidden] { display: none !important; }
+	#actions { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+	#actions.disabled button:not(#dl-voice) { opacity: .38; pointer-events: none; }
+	.output-row { padding-top: 12px; border-top: 2px dashed var(--line); }
+
+	.wave-wrap { position: relative; border: 2px solid;
+		border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		overflow: hidden; background: var(--pit); }
+	#wave { width: 100%; height: 116px; display: block;
+		background:
+			linear-gradient(90deg, rgba(196,30,47,.08) 1px, transparent 1px) 0 0 / 40px 100%,
+			linear-gradient(180deg, rgba(74,58,94,.14) 1px, transparent 1px) 0 0 / 100% 29px,
+			var(--pit); }
+	#wave-hint { position: absolute; inset: 0; display: flex; align-items: center;
+		justify-content: center; text-align: center; padding: 16px; color: var(--ash);
+		font-size: 18px; pointer-events: none; }
+	#wave-hint.gone { display: none; }
+
+	#toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(8px);
+		background: var(--pit); color: var(--bone); border: 2px solid;
+		border-color: var(--lite) var(--dark) var(--dark) var(--lite);
+		padding: 11px 18px; font-size: 18px; opacity: 0;
+		transition: opacity .25s, transform .25s; pointer-events: none; z-index: 110;
+		max-width: 90vw; box-shadow: 5px 5px 0 rgba(0,0,0,.6); }
+	#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+	/* ── loading overlay ────────────────────────────────────────────────── */
+	#overlay { position: fixed; inset: 0; background: var(--void);
+		display: flex; flex-direction: column; align-items: center; justify-content: center;
+		gap: 16px; z-index: 105; transition: opacity .35s; transform: translateZ(0); }
+	#overlay.gone { opacity: 0; pointer-events: none; }
+	#overlay.hidden { display: none; }
+	.skull-px { width: 96px; height: 96px; image-rendering: pixelated; }
+	.skull-px rect { shape-rendering: crispEdges; }
+	#overlay .boot { font: 12px/1.8 var(--px); color: var(--bone); letter-spacing: .06em;
+		text-shadow: 2px 2px 0 var(--blood-dk); }
+	.load-track { width: 340px; max-width: 74vw; height: 18px;
+		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); overflow: hidden; padding: 2px; }
+	#load-bar { height: 100%; width: 0%; transition: width .15s;
+		background: repeating-linear-gradient(90deg, var(--blood) 0 8px, var(--blood-dk) 8px 10px); }
+	#load-label { color: var(--phosphor); font-size: 18px;
+		text-shadow: 0 0 6px rgba(107,255,107,.4); }
+	#load-label::before { content: "C:\\> "; color: var(--ash); }
+
+	/* ── clone modal ────────────────────────────────────────────────────── */
+	#clone-modal { position: fixed; inset: 0; background: rgba(4,2,8,.72);
+		display: none; align-items: center; justify-content: center; z-index: 106; padding: 16px; }
+	#clone-modal.show { display: flex; }
+	.modal { width: 560px; max-width: 100%; display: flex; flex-direction: column; }
+	.modal-body { background: var(--crypt); padding: 16px; display: flex;
+		flex-direction: column; gap: 13px; }
+	.tabs { display: flex; gap: 4px; padding: 0; }
+	.tabs button { flex: 1; border: 2px solid; border-color: var(--lite) var(--dark) var(--dark) var(--lite);
+		background: var(--tomb); padding: 10px; cursor: pointer;
+		font: 10px/1.5 var(--px); color: var(--ash); text-transform: uppercase; }
+	.tabs button:hover:not(.active) { color: var(--bone); }
+	.tabs button.active { border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); color: var(--phosphor); text-shadow: 0 0 6px rgba(107,255,107,.5); }
+	#pane-file { border: 2px dashed var(--line); padding: 28px 22px;
+		text-align: center; color: var(--ash); font-size: 19px; background: var(--pit); }
+	#pane-file.over { border-color: var(--phosphor); color: var(--phosphor); }
+	#pane-file input { display: none; }
+	#pane-file label { color: var(--amber); cursor: pointer; text-decoration: underline; }
+	#rec-wave { width: 100%; height: 68px; background: var(--pit);
+		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	.rec-row { display: flex; align-items: center; gap: 12px; }
+	.rec-row button.primary { min-height: 40px; padding: 10px 16px; font-size: 10px; }
+	#rec-time { font-variant-numeric: tabular-nums; color: var(--amber); min-width: 48px; font-size: 18px; }
+	.rec-track { flex: 1; height: 14px; border: 2px solid;
+		border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); overflow: hidden; padding: 1px; }
+	#rec-bar { height: 100%; width: 0%; transition: width .1s; }
+	#rec-bar.short { background: repeating-linear-gradient(90deg, var(--amber) 0 6px, #A87A2A 6px 8px); }
+	#rec-bar.good { background: repeating-linear-gradient(90deg, var(--phosphor) 0 6px, #3BAA3B 6px 8px); }
+	#rec-bar.long { background: repeating-linear-gradient(90deg, var(--amber) 0 6px, #A87A2A 6px 8px); }
+	#record.recording { background: var(--blood-dk); animation: rec-pulse 1.2s steps(2, start) infinite; }
+	@keyframes rec-pulse { 50% { background: var(--blood); } }
+	.hint { color: var(--ash); font-size: 16px; }
+	.msg { font-size: 18px; padding: 9px 12px; background: var(--pit);
+		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	.msg.err { color: var(--blood-lite); }
+	.msg.warn { color: var(--amber); }
+	.msg.ok { color: var(--phosphor); }
+	#clone-name { border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); color: var(--phosphor); padding: 9px 12px;
+		font: 19px var(--vt); flex: 1; caret-color: var(--phosphor); }
+	#clone-name:focus { outline: none; border-color: var(--dark) var(--blood) var(--blood) var(--dark); }
+	#clone-name::placeholder { color: var(--ash); }
+	.modal-foot { display: flex; gap: 8px; justify-content: flex-end; }
+	.modal-foot button.primary { min-height: 40px; padding: 10px 18px; font-size: 10px; }
+
+	.clip-wrap { position: relative; margin-top: 10px; touch-action: none; }
+	#clip-wave { width: 100%; height: 64px; display: block; background: var(--pit);
+		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	.clip-shade { position: absolute; top: 2px; bottom: 2px; background: rgba(4,2,8,.74);
+		pointer-events: none; }
+	.clip-handle { position: absolute; top: 0; bottom: 0; width: 12px; cursor: ew-resize;
+		background: var(--amber); border: 2px solid;
+		border-color: #F5CE7E var(--dark) var(--dark) #F5CE7E; }
+	.clip-handle::after { content: "║"; display: flex; align-items: center; justify-content: center;
+		height: 100%; font-size: 10px; color: var(--dark); }
+	.clip-row { margin-top: 8px; }
+	#clip-sel { font-variant-numeric: tabular-nums; }
+	#am-use { background: var(--blood-dk); border: 2px solid;
+		border-color: var(--blood-lite) var(--dark) var(--dark) var(--blood-lite);
+		color: var(--bone); padding: 7px 14px; font: 15px/1 var(--vt); cursor: pointer; }
+	#am-use:hover { background: var(--blood); }
+	#am-use:active { border-color: var(--dark) var(--blood-lite) var(--blood-lite) var(--dark); }
+
+	/* ── AudioMass modal ────────────────────────────────────────────────── */
+	#am-modal { position: fixed; inset: 0; z-index: 107; display: none;
+		flex-direction: column; background: var(--void); }
+	#am-modal.show { display: flex; }
+	.am-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+		color: var(--ash); font-size: 17px; background: var(--crypt);
+		border-bottom: 2px solid var(--dark); }
+	.am-bar strong { font: 10px/1.5 var(--px); color: var(--bone); }
+	.am-bar .grow { flex: 1; }
+	#am-close { background: var(--tomb); border: 2px solid;
+		border-color: var(--lite) var(--dark) var(--dark) var(--lite); color: var(--bone);
+		padding: 7px 14px; font: 15px/1 var(--vt); cursor: pointer; }
+	#am-close:hover { color: var(--amber); }
+	#am-close:active { border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	#am-frame { flex: 1; border: 0; width: 100%; background: #14181B; }
+
+	/* ── writeup: README window ─────────────────────────────────────────── */
+	.txt-win { margin-top: 86px; }
+	.writeup { padding: 20px 22px; max-width: none; }
+	.writeup .eyebrow { font: 9px/1.6 var(--px); letter-spacing: .12em;
+		text-transform: uppercase; color: var(--amber); margin: 0 0 10px; }
+	.writeup h2 { font: 15px/1.5 var(--px); margin: 0 0 12px; color: var(--bone);
+		text-shadow: 2px 2px 0 var(--blood-dk); }
+	.writeup h3 { font: 11px/1.6 var(--px); margin: 28px 0 8px; color: var(--blood-lite); }
+	.writeup h3::before { content: "»» "; color: var(--ash); }
+	.writeup p { color: #D8CCBA; font-family: Arial, Helvetica, sans-serif; font-size: 17px;
+		line-height: 1.68; letter-spacing: 0; max-width: none; width: 100%;
+		margin: 10px 0 12px; overflow-wrap: break-word; text-wrap: pretty; }
+	.writeup ul { margin: 10px 0 14px; padding-left: 24px; color: #D8CCBA;
+		font: 17px/1.58 Arial, Helvetica, sans-serif; }
+	.writeup li { margin: 7px 0; padding-left: 2px; }
+	.writeup .dim { color: var(--ash); }
+	.writeup .demo-video { display: block; width: 100%; aspect-ratio: 16 / 9;
+		margin: 18px 0 18px; background: #05070A; border: 2px solid;
+		border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+	.writeup .intro-eyebrow { margin-bottom: 12px; }
+	.writeup .intro-title { margin-bottom: 18px; }
+	.writeup .section-title { margin-top: 36px; margin-bottom: 13px; }
+	.writeup .bottom-source { margin-top: 26px; font-size: 15px; text-align: center; }
+	.writeup .agent-note { margin: 26px 0 24px; padding: 2px 0 2px 18px;
+		border-left: 3px solid var(--amber); }
+	.writeup .agent-note h3 { margin-top: 0; color: var(--amber); }
+	.writeup .agent-note h3::before { content: none; }
+	.writeup a { color: var(--amber); }
+	.writeup strong { color: var(--phosphor); font-weight: 400;
+		text-shadow: 0 0 6px rgba(107,255,107,.35); }
+	.writeup table { width: 100%; border-collapse: collapse; margin: 16px 0 6px;
+		font: 16px/1.55 Arial, Helvetica, sans-serif; font-variant-numeric: tabular-nums;
+		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
+		background: var(--pit); }
+	.writeup th { text-align: left; font: 700 12px/1.5 Arial, Helvetica, sans-serif; color: var(--amber);
+		text-transform: uppercase; letter-spacing: .04em; }
+	.writeup th, .writeup td { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+	.writeup td.num { color: var(--phosphor); font-weight: 700;
+		text-shadow: 0 0 6px rgba(107,255,107,.35); }
+	.writeup code { background: var(--tomb); border: 1px solid var(--line); padding: 0 5px;
+		font: 17px var(--vt); color: var(--amber); }
+
+	/* ── footer: shrine paraphernalia ───────────────────────────────────── */
+	footer { margin-top: 34px; color: var(--ash); font-size: 17px;
+		display: flex; flex-direction: column; gap: 14px; }
+	footer a { color: var(--amber); text-decoration: underline; }
+	.shrine-row { display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
+		justify-content: space-between; padding-top: 0; }
+	.badges { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+	.badge88 { width: 88px; height: 31px; display: inline-flex; flex-direction: column;
+		align-items: center; justify-content: center; gap: 2px; text-align: center;
+		border: 2px solid; border-color: var(--lite) var(--dark) var(--dark) var(--lite);
+		font: 7px/1.2 var(--px); text-transform: uppercase; letter-spacing: .02em; }
+	.badge88 em { font-style: normal; font-size: 6px; }
+	.badge88.b1 { background: var(--blood-dk); color: var(--bone); }
+	.badge88.b1 em { color: var(--amber); }
+	.badge88.b2 { background: var(--pit); color: var(--phosphor); }
+	.badge88.b2 em { color: var(--ash); }
+	.badge88.b3 { background: var(--tomb); color: var(--amber); }
+	.badge88.b3 em { color: var(--ash); }
+	.badge88.b4 { background: var(--pit); color: var(--phosphor); }
+	.badge88.b4 em { color: var(--ash); }
+	.counter { display: inline-flex; align-items: center; gap: 9px; font-size: 16px; }
+	.counter b { display: inline-flex; gap: 2px; font-weight: 400; }
+	.counter b i { font: 12px/1 var(--px); font-style: normal; color: var(--phosphor);
+		background: var(--pit); border: 1px solid var(--line); padding: 4px 3px;
+		text-shadow: 0 0 6px rgba(107,255,107,.5); }
+	.guestbook { font-size: 17px; }
+	.credit { padding-top: 4px; }
+
+	@media (prefers-reduced-motion: reduce) {
+		.marquee span, .pixel-raven .raven-eye, .pixel-raven.hop, #status::after,
+		.hero-line .blink, #record.recording { animation: none; }
+		#toast, #overlay { transition: none; }
+	}
+
+	.divider { text-align: center; color: var(--line); margin: 44px 0 -18px;
+		font-size: 15px; letter-spacing: 2px; text-shadow: 0 0 8px rgba(196,30,47,.25);
+		user-select: none; }
+	.readme-boundary { height: 0; margin: 34px 0 28px; border-top: 4px solid var(--bone);
+		box-shadow: 0 4px 0 var(--dark); }
+	#engine-badge { display: none !important; position: absolute; right: 20px; top: 58px; z-index: 20;
+		font: 8px/1.6 var(--px); color: var(--phosphor); text-transform: uppercase;
+		text-shadow: 0 0 6px rgba(107,255,107,.4); letter-spacing: .04em; }
+	#win-engine { display: none !important; margin-left: 10px; color: var(--phosphor);
+		text-shadow: 0 0 6px rgba(107,255,107,.4); }
+	#theme-toggle { position: absolute; right: 20px; top: 22px; z-index: 20;
+		background: var(--tomb); color: var(--ash); cursor: pointer;
+		border: 2px solid; border-color: var(--lite) var(--dark) var(--dark) var(--lite);
+		font: 8px/1.6 var(--px); text-transform: uppercase; padding: 7px 9px; }
+	#theme-toggle:hover { color: var(--amber); }
+	#theme-toggle:active { border-color: var(--dark) var(--lite) var(--lite) var(--dark); }
+
+	/* ═══ CLEAN THEME: boring, modern, minimalist ═══════════════════════ */
+	html[data-theme="clean"] body { background: #FAFAF9; color: #1C2024;
+		font: 15px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif;
+		-webkit-font-smoothing: antialiased; image-rendering: auto; }
+	html[data-theme="clean"] body::after { display: none; }
+	html[data-theme="clean"] .divider,
+	html[data-theme="clean"] .marquee, html[data-theme="clean"] .win-bar,
+	html[data-theme="clean"] .raven-stage, html[data-theme="clean"] .badges,
+	html[data-theme="clean"] .counter, html[data-theme="clean"] .skull-px,
+	html[data-theme="clean"] .hero-line .blink, html[data-theme="clean"] #status::before,
+	html[data-theme="clean"] #status::after, html[data-theme="clean"] #load-label::before,
+	html[data-theme="clean"] .writeup h3::before { display: none; content: none; }
+	html[data-theme="clean"] #engine-badge { display: none !important; font: 600 10px/1.6 inherit; color: #9AA4AE;
+		text-transform: none; text-shadow: none; letter-spacing: 0; }
+	html[data-theme="clean"] #win-engine { display: none; }
+	html[data-theme="clean"] #mute-hint { color: #9AA4AE; font-size: 13px; }
+	html[data-theme="clean"] #theme-toggle { background: #fff; color: #6B7480;
+		border: 1px solid #E4E7EA; border-radius: 8px; font: 600 11px/1.4 inherit;
+		text-transform: none; padding: 7px 11px; }
+	html[data-theme="clean"] #theme-toggle:hover { color: #1C2024; }
+	html[data-theme="clean"] .hero-panel { padding-right: 0; min-height: 0; }
+	html[data-theme="clean"] h1 { font: 700 34px/1.1 inherit; color: #1C2024; text-shadow: none; }
+	html[data-theme="clean"] h1 .tld { color: #6B7480; }
+	html[data-theme="clean"] .hero-line { font: 600 11px/1.6 inherit; letter-spacing: .1em;
+		color: #6B7480; text-transform: uppercase; }
+	html[data-theme="clean"] .tagline { color: #4B545C; font-size: 15px; }
+	html[data-theme="clean"] .steps span { border: 0; background: transparent;
+		color: #6B7480; font-size: 13px; padding: 6px 0; }
+	html[data-theme="clean"] .steps span b { background: #1C2024; color: #fff;
+		border: 0; border-radius: 6px; font: 700 11px/1 inherit; }
+	html[data-theme="clean"] .win { border: 1px solid #E4E7EA; border-radius: 12px;
+		background: #fff; box-shadow: 0 1px 2px rgba(20,24,28,.05), 0 12px 32px rgba(20,24,28,.07);
+		overflow: hidden; }
+	html[data-theme="clean"] .card { background: #fff; padding: 20px; }
+	html[data-theme="clean"] #voices { border: 1px solid #EDEFF1; border-radius: 10px; background: #F6F7F8; }
+	html[data-theme="clean"] .chip { border: 1px solid #E4E7EA; border-radius: 8px;
+		background: #fff; color: #1C2024; font: 500 13.5px/1 inherit; }
+	html[data-theme="clean"] .chip:hover { background: #FAFBFB; }
+	html[data-theme="clean"] .chip.active { background: #1C2024; border-color: #1C2024;
+		color: #fff; text-shadow: none; }
+	html[data-theme="clean"] .chip.add { border-style: dashed; color: #6B7480; background: transparent; }
+	html[data-theme="clean"] .chip .tag { font: 600 9px/1 inherit; color: inherit; opacity: .6; }
+	html[data-theme="clean"] textarea { border: 1px solid #E4E7EA; border-radius: 10px;
+		background: #fff; color: #1C2024; font: 15px/1.55 inherit; text-shadow: none;
+		caret-color: auto; }
+	html[data-theme="clean"] textarea:focus { border-color: #9AA4AE;
+		box-shadow: 0 0 0 3px rgba(28,32,36,.06); }
+	html[data-theme="clean"] .params label { font: 600 11px/1.6 inherit; color: #6B7480; }
+	html[data-theme="clean"] #temp-val { font: 700 12.5px ui-monospace, monospace; color: #1C2024; }
+	html[data-theme="clean"] input[type=range] { border: 0; border-radius: 999px;
+		background: #E4E7EA; height: 4px; }
+	html[data-theme="clean"] input[type=range]::-webkit-slider-thumb { border-radius: 50%;
+		background: #1C2024; border: 2.5px solid #fff; box-shadow: 0 1px 3px rgba(20,24,28,.3); }
+	html[data-theme="clean"] input[type=range]::-moz-range-thumb { border-radius: 50%;
+		background: #1C2024; border: 2.5px solid #fff; }
+	html[data-theme="clean"] #status { color: #6B7480; font-size: 13px; text-shadow: none; }
+	html[data-theme="clean"] button.primary { background: #1C2024; border: 0; border-radius: 9px;
+		color: #fff; font: 600 14px/1 inherit; text-transform: none; letter-spacing: 0;
+		text-shadow: none; }
+	html[data-theme="clean"] button.primary:hover:not(:disabled) { background: #33383E; }
+	html[data-theme="clean"] button.primary:active:not(:disabled) { background: #101315; transform: translateY(1px); }
+	html[data-theme="clean"] button.primary:disabled { background: #E4E7EA; color: #9AA4AE; }
+	html[data-theme="clean"] button.ghost { background: #fff; border: 1px solid #E4E7EA;
+		border-radius: 8px; color: #4B545C; font: 500 13px/1 inherit; }
+	html[data-theme="clean"] button.ghost:hover { background: #F6F7F8; color: #1C2024; }
+	html[data-theme="clean"] .output-row { border-top: 1px solid #EDEFF1; }
+	html[data-theme="clean"] .wave-wrap { border: 1px solid #EDEFF1; border-radius: 10px; background: #F6F7F8; }
+	html[data-theme="clean"] #wave { background: #F6F7F8; }
+	html[data-theme="clean"] #wave-hint { color: #9AA4AE; font-size: 13px; }
+	html[data-theme="clean"] #toast { background: #1C2024; color: #fff; border: 0;
+		border-radius: 10px; font-size: 13.5px; box-shadow: 0 8px 24px rgba(20,24,28,.25); }
+	html[data-theme="clean"] #overlay { background: #FAFAF9; }
+	html[data-theme="clean"] #overlay .boot { font: 700 16px/1.6 inherit; color: #1C2024; text-shadow: none; }
+	html[data-theme="clean"] .load-track { border: 0; border-radius: 999px; background: #E4E7EA;
+		height: 7px; padding: 0; }
+	html[data-theme="clean"] #load-bar { background: #1C2024; border-radius: inherit; }
+	html[data-theme="clean"] #load-label { color: #6B7480; font-size: 14px; text-shadow: none; }
+	html[data-theme="clean"] #clone-modal { background: rgba(20,24,28,.4); backdrop-filter: blur(6px); }
+	html[data-theme="clean"] .modal-body { background: #fff; padding: 20px; }
+	html[data-theme="clean"] .tabs button { border: 1px solid #E4E7EA; border-radius: 8px;
+		background: #F6F7F8; color: #6B7480; font: 600 13px/1.4 inherit; text-transform: none; }
+	html[data-theme="clean"] .tabs button.active { background: #1C2024; border-color: #1C2024;
+		color: #fff; text-shadow: none; }
+	html[data-theme="clean"] #pane-file { border: 1.5px dashed #D4D9DD; border-radius: 10px;
+		background: #FAFBFB; color: #6B7480; font-size: 14px; }
+	html[data-theme="clean"] #pane-file.over { border-color: #1C2024; color: #1C2024; }
+	html[data-theme="clean"] #pane-file label { color: #1C2024; }
+	html[data-theme="clean"] #rec-wave { border: 1px solid #EDEFF1; border-radius: 8px; background: #FAFBFB; }
+	html[data-theme="clean"] .rec-track { border: 0; border-radius: 999px; background: #E4E7EA;
+		height: 7px; padding: 0; }
+	html[data-theme="clean"] #rec-bar.short, html[data-theme="clean"] #rec-bar.long { background: #C9972E; }
+	html[data-theme="clean"] #rec-bar.good { background: #23843F; }
+	html[data-theme="clean"] #rec-time { color: #6B7480; font-size: 13px; }
+	html[data-theme="clean"] .hint { color: #9AA4AE; font-size: 12.5px; }
+	html[data-theme="clean"] .msg { border: 0; border-radius: 8px; font-size: 13.5px; background: #F6F7F8; }
+	html[data-theme="clean"] .msg.err { background: #FBEDEC; color: #B3392F; }
+	html[data-theme="clean"] .msg.warn { background: #F9F2E2; color: #8A6215; }
+	html[data-theme="clean"] .msg.ok { background: #EAF4EE; color: #23843F; }
+	html[data-theme="clean"] #clone-name { border: 1px solid #E4E7EA; border-radius: 8px;
+		background: #fff; color: #1C2024; font: 15px inherit; caret-color: auto; }
+	html[data-theme="clean"] #clip-wave { border: 1px solid #EDEFF1; border-radius: 8px; background: #FAFBFB; }
+	html[data-theme="clean"] .clip-shade { background: rgba(250,250,249,.78); }
+	html[data-theme="clean"] .clip-handle { background: #1C2024; border: 0; border-radius: 4px; width: 10px; }
+	html[data-theme="clean"] .clip-handle::after { color: #fff; }
+	html[data-theme="clean"] #am-use { background: #1C2024; border: 0; border-radius: 8px;
+		color: #fff; font: 500 13px/1 inherit; }
+	html[data-theme="clean"] .am-bar { background: #fff; border-bottom: 1px solid #E4E7EA;
+		color: #6B7480; font-size: 13px; }
+	html[data-theme="clean"] .am-bar strong { font: 600 13px/1.4 inherit; color: #1C2024; }
+	html[data-theme="clean"] #am-close { background: #fff; border: 1px solid #E4E7EA;
+		border-radius: 8px; color: #4B545C; font: 500 13px/1 inherit; }
+	html[data-theme="clean"] #am-modal { background: #FAFAF9; }
+	html[data-theme="clean"] .readme-boundary { border-top: 1px solid #D4D9DD; box-shadow: none; }
+	html[data-theme="clean"] .writeup { padding: 26px 28px; }
+	html[data-theme="clean"] .writeup .eyebrow { font: 600 11px/1.6 inherit; color: #6B7480; }
+	html[data-theme="clean"] .writeup h2 { font: 700 21px/1.3 inherit; color: #1C2024; text-shadow: none; }
+	html[data-theme="clean"] .writeup .agent-note { border-left-color: #1C2024; }
+	html[data-theme="clean"] .writeup .agent-note h3 { color: #1C2024; }
+	html[data-theme="clean"] .writeup h3 { font: 700 15px/1.4 inherit; color: #1C2024; }
+	html[data-theme="clean"] .writeup p { color: #33383E; font-size: 15.5px; line-height: 1.7; }
+	html[data-theme="clean"] .writeup ul { color: #33383E; font-size: 15.5px; line-height: 1.65; }
+	html[data-theme="clean"] .writeup .bottom-source { color: #6B7480; }
+	html[data-theme="clean"] .writeup .demo-video { border: 1px solid #E4E7EA; border-radius: 8px;
+		background: #000; }
+	html[data-theme="clean"] .writeup a { color: #1C2024; }
+	html[data-theme="clean"] .writeup strong { color: #1C2024; font-weight: 700; text-shadow: none; }
+	html[data-theme="clean"] .writeup table { border: 0; background: transparent; font-size: 14.5px; }
+	html[data-theme="clean"] .writeup th { font: 700 11.5px/1.6 inherit; color: #6B7480; }
+	html[data-theme="clean"] .writeup th, html[data-theme="clean"] .writeup td {
+		border-bottom: 1px solid #EDEFF1; padding: 9px 18px 9px 0; }
+	html[data-theme="clean"] .writeup td.num { color: #1C2024; font-weight: 700; text-shadow: none; }
+	html[data-theme="clean"] .writeup code { background: #F0F2F3; border: 0; border-radius: 5px;
+		font: 12.5px ui-monospace, monospace; color: #1C2024; }
+	html[data-theme="clean"] footer { color: #9AA4AE; font-size: 12.5px; }
+	html[data-theme="clean"] footer a { color: #4B545C; }
+	html[data-theme="clean"] .shrine-row { border-top: 0; }
+
+	@media (max-width: 720px) {
+		main { padding: 16px 12px 56px; }
+		#theme-toggle { right: 12px; top: 14px; }
+		#engine-badge { display: none !important; }
+		h1 { font-size: 19px; }
+		.tagline { font-size: 18px; }
+		textarea { min-height: 150px; font-size: 18px; }
+		.hero-panel { display: flex; flex-direction: column; min-height: 0; padding: 4px 0 8px; }
+		.hero-panel > div:first-child { display: contents; }
+		.hero-line { order: 1; }
+		.hero-panel header { order: 2; }
+		.tagline { order: 3; }
+		.raven-stage { order: 4; align-self: flex-end; position: relative; right: auto; top: auto;
+			width: 142px; height: 74px; margin: -4px 12px 8px 0; }
+		.raven-stage::before { right: 20px; top: 0; width: 42px; height: 42px; }
+		.raven-stage::after { right: 0; bottom: 10px; width: 108px; height: 5px; }
+		.pixel-raven { right: 30px; top: 3px; width: 64px; height: 64px; }
+		.raven-caption { right: 0; bottom: -1px; font-size: 7px; }
+		.steps { order: 5; gap: 6px; margin: 8px 0 14px; }
+		.steps span { padding: 7px 7px; font-size: 15px; }
+		.steps span b { width: 18px; height: 18px; margin-right: 6px; font-size: 9px; }
+		.card { padding: 12px; gap: 13px; }
+		.chip { flex: 1 1 auto; justify-content: center; }
+		#mute-hint { display: block; text-align: center; font-size: 16px;
+			color: var(--amber); margin: -4px 0; }
+		.control-row { flex-direction: column; align-items: stretch; gap: 10px; }
+		.control-row .params { justify-content: space-between; }
+		.control-row .params input { flex: 1; width: auto; }
+		.control-row button.primary { width: 100%; }
+		.row { align-items: flex-start; }
+		#status { flex-basis: 100%; }
+		#actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		button.ghost { justify-content: center; }
+		button#edit-am { grid-column: 1 / -1; }
+		.txt-win { margin-top: 44px; }
+		.writeup { padding: 14px; }
+		.writeup table { display: block; overflow-x: auto; }
+		.modal-body { padding: 13px; }
+		.rec-row { flex-wrap: wrap; }
+		.rec-row button.primary { width: 100%; }
+		.shrine-row { flex-direction: column; align-items: flex-start; }
+	}
+</style>
+</head>
+<body>
+
+<div id="overlay">
+	<svg class="pixel-raven skull-px" style="position:static" viewBox="0 0 16 16" role="img">
+				<rect x="7" y="1" width="3" height="1" fill="#1B1822"/>
+				<rect x="6" y="2" width="5" height="1" fill="#1B1822"/>
+				<rect x="5" y="3" width="7" height="1" fill="#1B1822"/>
+				<rect x="4" y="4" width="8" height="1" fill="#1B1822"/>
+				<rect x="3" y="5" width="9" height="1" fill="#1B1822"/>
+				<rect x="2" y="6" width="9" height="1" fill="#241C2C"/>
+				<rect x="2" y="7" width="8" height="1" fill="#241C2C"/>
+				<rect x="3" y="8" width="7" height="1" fill="#1B1822"/>
+				<rect x="4" y="9" width="5" height="1" fill="#1B1822"/>
+				<rect x="5" y="10" width="4" height="1" fill="#141119"/>
+				<rect x="6" y="11" width="2" height="2" fill="#141119"/>
+				<rect x="5" y="13" width="1" height="1" fill="#4B3032"/>
+				<rect x="8" y="13" width="1" height="1" fill="#4B3032"/>
+				<rect x="11" y="3" width="3" height="1" fill="#D68C45"/>
+				<rect x="12" y="4" width="2" height="1" fill="#A65F31"/>
+				<rect class="raven-eye" x="9" y="3" width="1" height="1" fill="#F6DCA4"/>
+				<rect x="1" y="7" width="1" height="1" fill="#3A263F"/>
+				<rect x="0" y="8" width="2" height="1" fill="#3A263F"/>
+				<rect x="1" y="9" width="2" height="1" fill="#2B2034"/>
+				<rect x="9" y="7" width="2" height="1" fill="#3A263F"/>
+				<rect x="10" y="8" width="2" height="1" fill="#2B2034"/>
+			</svg>
+	<div class="boot">POCKET·TTS</div>
+	<div class="load-track"><div id="load-bar"></div></div>
+	<div id="load-label">Summoning…</div>
+</div>
+
+<main>
+	<button id="theme-toggle" title="Too spooky? Switch to boring modern mode">✕ crypt</button>
+	<div class="marquee" aria-hidden="true"><span>&nbsp;☠ VOICES CLONED LOCALLY. YOUR AUDIO NEVER LEAVES YOUR MACHINE. NO GPU REQUIRED. ☠&nbsp;&nbsp;☠ VOICES CLONED LOCALLY. YOUR AUDIO NEVER LEAVES YOUR MACHINE. NO GPU REQUIRED. ☠&nbsp;&nbsp;☠ VOICES CLONED LOCALLY. YOUR AUDIO NEVER LEAVES YOUR MACHINE. NO GPU REQUIRED. ☠&nbsp;&nbsp;☠ VOICES CLONED LOCALLY. YOUR AUDIO NEVER LEAVES YOUR MACHINE. NO GPU REQUIRED. ☠&nbsp;</span></div>
+
+	<div class="hero-panel">
+		<div>
+			<span class="hero-line">local inference · <span class="blink">▓</span> no cloud séance</span>
+			<header>
+				<h1>Pocket<span class="tld">TTS</span>-RAVEN</h1>
+			</header>
+			<p class="tagline">Faster-than-realtime text-to-voice with voice cloning.<br>
+			Native C++ and browser WASM builds, running locally on CPU.</p>
+			
+			<div class="steps">
+				<span><b>1</b>Pick voice</span>
+				<span><b>2</b>Write line</span>
+				<span><b>3</b>Make audio</span>
+			</div>
+		</div>
+		<div class="raven-stage" aria-hidden="true">
+			<svg class="pixel-raven" viewBox="0 0 16 16" role="img">
+				<rect x="7" y="1" width="3" height="1" fill="#1B1822"/>
+				<rect x="6" y="2" width="5" height="1" fill="#1B1822"/>
+				<rect x="5" y="3" width="7" height="1" fill="#1B1822"/>
+				<rect x="4" y="4" width="8" height="1" fill="#1B1822"/>
+				<rect x="3" y="5" width="9" height="1" fill="#1B1822"/>
+				<rect x="2" y="6" width="9" height="1" fill="#241C2C"/>
+				<rect x="2" y="7" width="8" height="1" fill="#241C2C"/>
+				<rect x="3" y="8" width="7" height="1" fill="#1B1822"/>
+				<rect x="4" y="9" width="5" height="1" fill="#1B1822"/>
+				<rect x="5" y="10" width="4" height="1" fill="#141119"/>
+				<rect x="6" y="11" width="2" height="2" fill="#141119"/>
+				<rect x="5" y="13" width="1" height="1" fill="#4B3032"/>
+				<rect x="8" y="13" width="1" height="1" fill="#4B3032"/>
+				<rect x="11" y="3" width="3" height="1" fill="#D68C45"/>
+				<rect x="12" y="4" width="2" height="1" fill="#A65F31"/>
+				<rect class="raven-eye" x="9" y="3" width="1" height="1" fill="#F6DCA4"/>
+				<rect x="1" y="7" width="1" height="1" fill="#3A263F"/>
+				<rect x="0" y="8" width="2" height="1" fill="#3A263F"/>
+				<rect x="1" y="9" width="2" height="1" fill="#2B2034"/>
+				<rect x="9" y="7" width="2" height="1" fill="#3A263F"/>
+				<rect x="10" y="8" width="2" height="1" fill="#2B2034"/>
+			</svg>
+			<span class="raven-caption">Nevermore.exe</span>
+		</div>
+	</div>
+
+	<div class="win app-win">
+		<div class="win-bar"><span class="sk">☠</span> VOICE_CRYPT.EXE<span id="win-engine"></span><span class="grow"></span><span class="win-dots"><i>_</i><i>□</i><i>×</i></span></div>
+		<div class="card">
+		<div id="voices"></div>
+		<textarea id="text" spellcheck="false">“Prophet” said I-“thing of evil. Prophet still if bird or devil.
+By that Heaven that bends above us, by that God we both adore.
+Tell this soul with sorrow laden, if within the distant Aiden,
+it shall clasp a sainted maiden whom the angels name Lenore.
+
+Clasp a rare and radiant maiden, whom the angels name Lenore.”
+
+Quoth the Raven...
+“Nevermore.”
+
+“Be that word our sign of parting, bird or fiend” I shrieked upstarting-
+“Get thee back into the tempest and the Night’s Plutonian shore.
+Leave no black plume as a token of that lie thy soul hath spoken.
+Leave my loneliness unbroken. Quit the bust above my door.
+Take thy beak from out my heart, and take thy form from off my door.”
+
+Quoth the Raven...
+“Nevermore.”
+
+And the Raven, never flitting, still is sitting, still is sitting, 
+on the pallid bust of Pallas, just above my chamber door.
+And his eyes have all the seeming of a demon’s that is dreaming.
+And the lamplight over him streaming, throws his shadow on the floor.
+And my soul from out that shadow, lies floating on the floor.
+Shall be lifted... 
+
+Nevermore...</textarea>
+		<div id="mute-hint" aria-hidden="true">☾ turn off silent mode and up your volume :)</div>
+		<div class="control-row">
+			<div class="params">
+				<label for="temp">Temperature</label>
+				<input id="temp" type="range" min="0.1" max="0.9" step="0.05" value="0.5">
+				<span id="temp-val">0.50</span>
+				<span class="hint grow">higher = more expressive, less predictable</span>
+			</div>
+			<button id="speak" class="primary" disabled title="Loading engine…">Speak</button>
+		</div>
+		<div class="row output-row">
+			<span id="status" class="grow">Loading engine…</span>
+			<span id="actions" class="disabled">
+				<button id="dl-voice" class="ghost" title="Download custom voice" hidden><svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1v8.2L5.4 6.6 4.3 7.7 8 11.4l3.7-3.7-1.1-1.1L8 9.2V1H8zM2 13h12v1.6H2z"/></svg>Voice</button>
+				<button id="replay" class="ghost" title="Play the last result again"><svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 3a5 5 0 1 1-4.9 6h1.55A3.5 3.5 0 1 0 8 4.5V7L4 4l4-3v2z"/></svg>Replay</button>
+				<button id="dl-wav" class="ghost" title="Download WAV - 24 kHz, lossless"><svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1v8.2L5.4 6.6 4.3 7.7 8 11.4l3.7-3.7-1.1-1.1L8 9.2V1H8zM2 13h12v1.6H2z"/></svg>WAV</button>
+				<button id="dl-mp3" class="ghost" title="Download MP3 - 128 kbps"><svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1v8.2L5.4 6.6 4.3 7.7 8 11.4l3.7-3.7-1.1-1.1L8 9.2V1H8zM2 13h12v1.6H2z"/></svg>MP3</button>
+					<button id="edit-am" class="ghost" title="Trim, apply effects and export in an optional local AudioMass editor"><svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.2 1.8a1.8 1.8 0 0 1 2.5 2.5L6 12l-3.4 1L3.6 9.6l7.6-7.8zM2 14h12v1.5H2z"/></svg>Edit in AudioMass</button>
+			</span>
+		</div>
+		<div class="wave-wrap">
+			<canvas id="wave"></canvas>
+			<div id="wave-hint">Your audio materializes here as it&rsquo;s generated</div>
+		</div>
+		</div>
+	</div>
+
+	<div id="toast" role="status"></div>
+
+	<div class="divider" aria-hidden="true">═══════✥═══ ☠ ═══✥═══════</div>
+
+	<footer>
+		<div class="shrine-row">
+			<span class="badges" aria-hidden="true">
+				<span class="badge88 b3">BEST VIEWED<em>800 × 600</em></span>
+				<span class="badge88 b4">CERTIFIED<em>&ldquo;Works on my computer&rdquo;</em></span>
+			</span>
+			<span class="counter">You are wanderer N°<b id="visits"></b></span>
+			<a class="guestbook" href="https://github.com/pkalogiros/pocket-tts-raven" target="_blank" rel="noopener">✍ sign the guestbook</a>
+		</div>
+		<span>
+			Runs PocketTTS models in your browser (WASM). First load downloads ~67&nbsp;MB of
+			models (cached); cloning fetches a 15&nbsp;MB encoder on first use. Cloned voices are entombed on this device only.
+		</span>
+		<span class="credit">
+				Optional waveform editing via <a href="https://audiomass.co" target="_blank" rel="noopener">AudioMass</a> —
+				a free, open-source audio editor that runs entirely in your browser.
+			&nbsp;·&nbsp; Made in San Francisco &nbsp;·&nbsp; <span aria-hidden="true">†</span> nevermore <span aria-hidden="true">†</span>
+		</span>
+	</footer>
+
+	<div class="readme-boundary" aria-hidden="true"></div>
+
+	<div class="win txt-win">
+		<div class="win-bar">README_4U.TXT — NOTEPAD<span class="grow"></span><span class="win-dots"><i>_</i><i>□</i><i>×</i></span></div>
+		<section class="writeup">
+			<p class="eyebrow intro-eyebrow">UNDER THE HOOD - <a href="https://github.com/pkalogiros/pocket-tts-raven" target="_blank" rel="noopener">SEE IT ON GITHUB</a></p>
+			<h2 class="intro-title">WHY DOES THIS THING EXIST?</h2>
+			<p>
+				In the past few weeks I have been working on a realtime conversational AI system.
+				The goal is to have a "creature" that can follow complex multi-step instructions,
+				carry a complex internal emotional state, interact with you and the world, and
+				connect on an emotional level. A disembodied robot of sorts. Or a
+				dis-embodied-buddy.
+			</p>
+			<p>
+				Such an undertaking requires low-latency speech, ideally response times below
+				400ms. If it waits too long, the illusion falls apart.
+			</p>
+			<p class="dim">[video of a demo]</p>
+			<p>
+				Along the way there were a lot of optimizations, detours, and dead ends. Some
+				of the most useful work landed in STT and TTS. I decided to start open-sourcing
+				pieces of the system before unveiling the companion itself. Today I am
+				releasing one of these pieces :)
+			</p>
+
+			<h3 class="section-title">Making PocketTTS fast enough</h3>
+			<p>
+				One of those pieces was PocketTTS. The original model comes from
+				<a href="https://kyutai.org/" target="_blank" rel="noopener">Kyutai</a> and was
+				released as a Python/PyTorch implementation. That version is already
+				impressive, but Python is not where I wanted the real-time game loop to wait
+				for audio. <a href="https://github.com/VolgaGerm/PocketTTS.cpp" target="_blank" rel="noopener">VolgaGerm&rsquo;s PocketTTS.cpp</a>
+				port moved the model to ONNX Runtime and C++, and was already fast enough to
+				be exciting: roughly 9.2x realtime on a Ryzen 7 3800X.
+			</p>
+			<p>
+				I wanted to see how far it could go without changing voice quality. On my
+				MacBook M4 Max, this optimized native version reaches roughly <strong>32-33x
+				realtime</strong>, with a first usable audio chunk around <strong>30ms</strong>
+				on this benchmark text, all on the CPU (3 threads).
+			</p>
+			<p class="dim"><em>(own local benchmarks)</em></p>
+			<table>
+				<tr><th>Stage</th><th>What changed</th><th>Result</th></tr>
+				<tr><td>Python Pocket TTS</td><td>Original Python/PyTorch model</td><td class="num">4.8x realtime, 210ms first useful audio</td></tr>
+				<tr><td>PocketTTS.cpp</td><td>Clean ONNX Runtime + C++ port</td><td class="num">11.4x realtime, 120ms first useful audio</td></tr>
+				<tr><td><strong>Optimized native path (ours)</strong></td><td>Graph rewrites, cache deltas, fused decoder work</td><td class="num">32.5x realtime, 30ms first useful audio</td></tr>
+				<tr><td><strong>Browser build (ours)</strong></td><td>WASM SIMD, threads, streaming playback, voice cloning</td><td class="num">up to ~14x realtime on M4 Max, ~4x on iPhone 16 Pro</td></tr>
+			</table>
+			<p class="dim">Native numbers are warm medians on a MacBook M4 Max using the page text and the Alba voice (3 threads). On different systems performance might vary.</p>
+			<p class="dim">TTS generations often start with a little silence or a short artifact, so "first useful audio" means the first chunk that contains usable speech, not just any waveform data. First audio chunk emitted is actually pretty close to ours on the other versions but if it is silence it is not a useful signal, so I took that into consideration on the benchmarks above.</p>
+
+				<aside class="agent-note">
+					<h3>On using AI agents for optimizing systems</h3>
+					<p>
+						This project was quite heavily vibecoded. After all, it does not bring a new
+						model to the table, make PocketTTS more accurate, or add some magical new
+						capability. It just makes it faster.<br>
+						Turns out AI agents are surprisingly efficient at that kind of work. You can
+						set concrete goals and let them ruminate, running around in circles, until
+						they eventually exhaust many of the possible paths.
+					</p>
+					<p>
+						One thing I noticed is that their intuition seems grounded in a lowest
+						denominator mix of best practice and common sense. Some of the ideas that
+						actually yielded the best results were looked down on by the agents at first,
+						and I had to push them to try the thing while they were trying to explain to
+						me why it was apparently a no-go. I think that since these systems are trained on human data,
+						they inherit human assumptions about what is too tedious, or too much of a
+						fool&rsquo;s errand. Computers, man... processing large amounts of incomprehensible
+						data and doing voodoo hex-code acrobatics was historically the point! Anyway..
+					</p>
+				</aside>
+
+				<h3 class="section-title">Some of the work</h3>
+				<p>
+					These performance gains were achieved while preserving the model&rsquo;s intended
+				audio quality: no additional low-bit quantization or quality-degrading network
+				pruning was used. Because the runtime and graph rewrites change floating-point
+				execution order, the final waveform can still be slightly different.<br>
+				<br>
+				More info:
+			</p>
+			<ul>
+				<li>delta-KV cache outputs instead of returning full cache tensors every step</li>
+				<li>FastKV graph rewrites to remove unnecessary cache gather/scatter work</li>
+				<li>AttentionTail custom op for the hot AR attention path</li>
+				<li>decoder cache delta updates</li>
+				<li>fused <code>ConvTranspose</code> streaming overlap logic</li>
+				<li>Accelerate-backed decoder Conv ops on Apple Silicon</li>
+				<li>cross-layer positional deduplication so RoPE/mask work is shared instead of recomputed per layer</li>
+				<li>merged main + flow model path for fewer runtime calls</li>
+				<li>KV snapshot cache for restoring warmed voice conditioning state quickly</li>
+				<li>trim-sustain / leading-burst rejection, not just trimming silence</li>
+				<li>WASM-specific runtime work: exception-free ORT boundary, fixed non-growable memory, and browser thread-pool tuning</li>
+			</ul>
+			<p>
+				If you are curious about the journey, I wrote up the optimization notes here:
+				<a href="https://github.com/pkalogiros/pocket-tts-raven/blob/main/docs/OPTIMIZATION_NOTES.md" target="_blank" rel="noopener">PocketTTS optimization notes</a>.
+			</p>
+			<p>
+				The native version became fast enough that I wanted to see if the same system
+				could be useful in the browser too. To my surprise, this web build can hit
+				around <strong>14x realtime</strong> on long text utterances on a MacBook M4
+				Max, and around <strong>4x realtime</strong> on an iPhone 16 Pro. In short,
+				the WASM version can be as fast as, or faster than, the clean native C++
+				version. The payload is about <strong>67MB</strong>, it supports voice cloning, and it runs locally.
+				Maybe it can be useful as a library, or a reference, for someone building
+				apps or games, or just tinkering with something that requires TTS.
+			</p>
+			<p>
+				Thanks a lot for reading. I&rsquo;ll be releasing the next parts of the project soon,
+				and soon enough the virtual intelligent cursed-hound ai that started this all as well.
+			</p>
+			<p class="dim">July 7, 2026</p>
+			<p class="bottom-source">
+				<strong><a href="https://github.com/pkalogiros/pocket-tts-raven" target="_blank" rel="noopener">Github: pkalogiros/pocket-tts-raven</a></strong><br>
+				Special thanks to <a href="https://kyutai.org/" target="_blank" rel="noopener">Kyutai</a> and <a href="https://github.com/VolgaGerm" target="_blank" rel="noopener">VolgaGerm</a> for Pocket-TTS and pocket-tts.cpp.<br>
+				And Mr. Poe for the nice poem and inspiration of course.
+			</p>
+		</section>
+	</div>
+</main>
+
+<div id="clone-modal">
+	<div class="modal win">
+		<div class="win-bar"><span class="sk">☠</span> CLONE_WIZARD.EXE<span class="grow"></span><span class="win-dots"><i>_</i><i>□</i><i id="clone-x" role="button" tabindex="0" aria-label="Close">×</i></span></div>
+		<div class="modal-body">
+		<div class="tabs">
+			<button id="tab-file">Audio file</button>
+			<button id="tab-mic">Microphone</button>
+		</div>
+
+		<div id="pane-file">
+			Drop an mp3 / wav / m4a here, or <label for="file-input">browse</label>.
+				<div class="hint">6–15 seconds of one person speaking, no music.</div>
+			<input id="file-input" type="file" accept="audio/*">
+		</div>
+
+		<div id="clip-preview" style="display:none">
+			<div class="clip-wrap">
+				<canvas id="clip-wave"></canvas>
+				<div id="clip-shade-l" class="clip-shade"></div>
+				<div id="clip-shade-r" class="clip-shade"></div>
+				<div id="clip-handle-l" class="clip-handle" title="Drag to trim"></div>
+				<div id="clip-handle-r" class="clip-handle" title="Drag to trim"></div>
+			</div>
+			<div class="row clip-row">
+				<span id="clip-sel" class="hint"></span>
+				<span class="grow"></span>
+				<button id="clip-edit" class="ghost" title="Opens the clip in an optional local AudioMass editor">🧹 edit / remove noise in AudioMass</button>
+			</div>
+		</div>
+
+		<div id="pane-mic" style="display:none">
+			<canvas id="rec-wave"></canvas>
+			<div class="rec-row">
+				<button id="record" class="primary">Start recording</button>
+				<span id="rec-time">0.0s</span>
+				<div class="rec-track"><div id="rec-bar"></div></div>
+			</div>
+			<div class="hint">Read a couple of sentences naturally. The bar turns green once you have enough.</div>
+		</div>
+
+		<div id="clone-report"></div>
+
+		<div class="row">
+			<input id="clone-name" placeholder="Name this voice">
+		</div>
+		<div class="modal-foot">
+			<button id="clone-close" class="ghost">Cancel</button>
+			<button id="clone-confirm" class="primary" disabled>Clone this voice</button>
+		</div>
+		</div>
+	</div>
+</div>
+
+<div id="am-modal">
+	<div class="am-bar">
+		<strong>AUDIOMASS.EXE</strong>
+			<span>editing pocket-tts.wav — changes stay in the editor; use its File &gt; Export to save</span>
+		<span class="grow"></span>
+		<button id="am-use" style="display:none">✓ Use this audio</button>
+		<button id="am-close">Close editor</button>
+	</div>
+	<iframe id="am-frame" title="AudioMass audio editor"></iframe>
+</div>
+
+<script>
+// AudioMass ships with optional offline caching. If installed locally for this
+// demo, clear any old AudioMass service worker that may have been registered.
+(function () {
+	if (!('serviceWorker' in navigator) || !navigator.serviceWorker.getRegistrations) return;
+	navigator.serviceWorker.getRegistrations().then(function (regs) {
+		regs.forEach(function (reg) {
+			if (reg.scope && reg.scope.indexOf('/audiomass/') !== -1) reg.unregister();
+		});
+	}).catch(function () {});
+})();
+
+// wanderer counter: implausibly ancient, as all good web counters should be
+(function () {
+	var n = 870000000 + Math.floor(Math.random() * 90000000);
+	var host = document.getElementById('visits');
+	String(n).split('').forEach(function (dgt) {
+		var i = document.createElement('i');
+		i.textContent = dgt;
+		host.appendChild(i);
+	});
+})();
+</script>
+<script>
+// Optional: serve heavy assets (models, wasm, workers) from a CDN by
+// setting an absolute base here. Leave unset for same-origin serving.
+// window.PKTTS_ASSET_BASE = 'https://cdn.example.com/pocket-tts-raven';
+</script>
+<script src="vendor/lame.js"></script>
+<script src="src/bus.js"></script>
+<script src="src/app.js"></script>
+<script src="src/ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PocketTTS WASM — minimal embedding</title>
+<style>
+	body { font: 16px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+	textarea { width: 100%; min-height: 90px; font: inherit; padding: 10px; box-sizing: border-box; }
+	button { font: inherit; padding: 10px 24px; margin-top: 8px; cursor: pointer; }
+	#status { color: #666; margin-left: 12px; }
+</style>
+</head>
+<body>
+<h1>PocketTTS WASM — minimal embedding</h1>
+<p>
+	The smallest useful integration: one worker owning the engine, one page
+	streaming the audio. ~60 lines of JS total. Serve with COOP/COEP headers
+	(<code>python3 webdemo/serve.py</code> does) and open
+	<code>/examples/minimal/</code>.
+</p>
+<textarea id="text">The crypt accepts your voice. This audio was synthesized entirely in your browser.</textarea>
+<div>
+	<button id="speak" disabled>Speak</button>
+	<span id="status">loading engine…</span>
+</div>
+
+<script type="module">
+const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+const btn = document.getElementById("speak");
+const status = document.getElementById("status");
+
+// Streaming playback: schedule each chunk right after the previous one.
+const ctx = new AudioContext({ sampleRate: 24000 });
+let playhead = 0;
+function playChunk(samples) {
+	const buf = ctx.createBuffer(1, samples.length, 24000);
+	buf.getChannelData(0).set(samples);
+	const src = ctx.createBufferSource();
+	src.buffer = buf;
+	src.connect(ctx.destination);
+	playhead = Math.max(playhead, ctx.currentTime + 0.05);
+	src.start(playhead);
+	playhead += buf.duration;
+}
+
+worker.onmessage = (e) => {
+	const d = e.data;
+	if (d.type === "progress") status.textContent = d.label;
+	if (d.type === "ready") { btn.disabled = false; status.textContent = "ready"; }
+	if (d.type === "chunk") playChunk(new Float32Array(d.samples));
+	if (d.type === "done") { btn.disabled = false; status.textContent = "done"; }
+	if (d.type === "error") { status.textContent = "error: " + d.message; }
+};
+
+btn.onclick = () => {
+	btn.disabled = true;
+	status.textContent = "generating…";
+	ctx.resume();
+	playhead = 0;
+	worker.postMessage({ text: document.getElementById("text").value });
+};
+</script>
+</body>
+</html>

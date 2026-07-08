@@ -1,0 +1,74 @@
+# Build artifacts
+.build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled binaries
+pocket-tts
+*.so
+*.so.*
+*.dylib
+*.dll
+*.lib
+*.exe
+
+# ONNX models (too large for git — download from HuggingFace)
+models/*.onnx
+
+# Tokenizer model (bundled with ONNX models)
+models/tokenizer.model
+
+# Voice samples (except the shipped example)
+voices/*
+
+# Voice embedding cache
+.cache/
+
+# Python virtual environment
+.venv/
+
+# Export script weight cache
+models/.cache/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Generated ONNX model sets (regenerate via export_onnx.py + make_*.py)
+onnx/
+webdemo/models/*.onnx
+webdemo/models/*.onnx.br
+webdemo/models/tokenizer.model*
+
+# Generated benchmark/test audio
+results/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Dev-server self-signed certificate (private key!)
+webdemo/.certs/
+
+# WASM build tree (artifacts land in webdemo/vendor/ptt)
+webdemo/wasm/build/
+webdemo/vendor/ptt/*relaxed*
+
+# Optional local AudioMass checkout/build. Keep only the integration README.
+webdemo/audiomass/*
+!webdemo/audiomass/README.md
+
+# Brotli pre-compressed assets (regenerate via webdemo/compress.py)
+webdemo/**/*.br
+webdemo/wasm/build-relaxed/
+
+# ship one sample voice so examples work out of the box
+!voices/example.wav

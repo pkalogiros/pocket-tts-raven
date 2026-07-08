@@ -1,0 +1,13 @@
+{
+  "name": "pockettts-webdemo",
+  "private": true,
+  "type": "module",
+  "description": "PocketTTS in the browser: voice cloning + speech on onnxruntime-web",
+  "scripts": {
+    "test": "node test/tokenizer.test.mjs && node test/xfer.test.mjs && node test/engine.test.mjs",
+    "serve": "python3 serve.py"
+  },
+  "devDependencies": {
+    "onnxruntime-web": "^1.27.0"
+  }
+}
