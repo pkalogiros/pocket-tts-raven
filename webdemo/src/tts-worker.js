@@ -16,6 +16,12 @@ function post(type, payload, transfer) {
   self.postMessage({ type, ...payload }, transfer || []);
 }
 
+function cloneCapSamples(capSeconds) {
+  const n = Number(capSeconds);
+  const seconds = Number.isFinite(n) && n > 0 ? Math.min(30, Math.max(1, n)) : 12;
+  return Math.round(seconds * SR);
+}
+
 // Rate-limit download progress: per-chunk posting floods the main thread.
 let lastProgressT = 0;
 function postProgress(label, pct) {
@@ -76,11 +82,14 @@ const handlers = {
     }
   },
 
-  async clone({ key, label, audio }) {
+  async clone({ key, label, audio, capSeconds }) {
     post("progress", { label: "Loading voice encoder", pct: 0 });
     await tts.loadEncoder();
     post("progress", { label: "Encoding voice", pct: 0.4 });
-    const emb = await tts.encodeVoice(audio);
+    let samples = audio;
+    const CAP = cloneCapSamples(capSeconds);
+    if (samples.length > CAP) samples = samples.subarray(0, CAP);
+    const emb = await tts.encodeVoice(samples);
     post("progress", { label: "Conditioning voice", pct: 0.75 });
     await tts.prepareVoice(key, emb);
     // Ship the embedding back so the app can persist it (OPFS).
@@ -92,13 +101,15 @@ const handlers = {
     tts.voiceSnapshots.delete(key); // frees the ~50MB KV snapshot
   },
 
-  async restoreVoice({ key, label, embDims, emb }) {
+  async restoreVoice({ key, label, embDims, emb, capSeconds }) {
     if (embDims && embDims.length) {
       await tts.prepareVoice(key, { dims: embDims, data: new Float32Array(emb) });
     } else {
       // Native-engine record: a 24kHz float32 WAV of the source audio.
       // Re-encode it (44-byte canonical header written by the native worker).
-      const samples = new Float32Array(emb, 44);
+      let samples = new Float32Array(emb, 44);
+      const CAP = cloneCapSamples(capSeconds);
+      if (samples.length > CAP) samples = samples.subarray(0, CAP);
       const embedding = await tts.encodeVoice(samples);
       await tts.prepareVoice(key, embedding);
     }

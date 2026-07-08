@@ -15,6 +15,12 @@ function assetJoin(base, path) {
   return base ? `${base}/${path}` : "";
 }
 
+function cloneCapSamples(capSeconds) {
+  const n = Number(capSeconds);
+  const seconds = Number.isFinite(n) && n > 0 ? Math.min(30, Math.max(1, n)) : 12;
+  return Math.round(seconds * SR);
+}
+
 function pttModuleOptions(assetBase, mainScriptUrl) {
   return {
     mainScriptUrlOrBlob: mainScriptUrl,
@@ -322,8 +328,10 @@ const handlers = {
     }
   },
 
-  async cloneInner({ key, label, audio }) {
-    const samples = new Float32Array(audio);
+  async cloneInner({ key, label, audio, capSeconds }) {
+    let samples = new Float32Array(audio);
+    const CAP = cloneCapSamples(capSeconds);
+    if (samples.length > CAP) samples = samples.subarray(0, CAP);
     M.FS.writeFile(`/voices/${key}.wav`, wavF32(samples));
     post("progress", { label: "Encoding + conditioning voice", pct: 0.5 });
     // Warm: run a short synthesis; encode_voice + KV conditioning results are
@@ -340,7 +348,7 @@ const handlers = {
     await serialize(() => handlers.cloneInner(payload));
   },
 
-  async restoreVoice({ key, label, embDims, emb }) {
+  async restoreVoice({ key, label, embDims, emb, capSeconds }) {
     if (embDims && embDims.length) {
       // TS-engine record: a raw float voice embedding. Write it as an EMB1
       // cache file — the engine then treats it exactly like a preset.
@@ -354,7 +362,15 @@ const handlers = {
       out.set(head); out.set(body, head.length);
       M.FS.writeFile(`/voices/.cache/${key}.emb`, out);
     } else {
-      M.FS.writeFile(`/voices/${key}.wav`, new Uint8Array(emb));
+      const capBytes = 44 + cloneCapSamples(capSeconds) * 4;
+      let bytes = new Uint8Array(emb);
+      if (bytes.length > capBytes) {
+        bytes = bytes.slice(0, capBytes);
+        const dv = new DataView(bytes.buffer);
+        dv.setUint32(4, bytes.length - 8, true);
+        dv.setUint32(40, bytes.length - 44, true);
+      }
+      M.FS.writeFile(`/voices/${key}.wav`, bytes);
     }
     post("voice", { key, label, builtin: false });
   },

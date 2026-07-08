@@ -1048,7 +1048,7 @@ if (w.PKTTS_UNSUPPORTED) {
 			if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile (e.dataTransfer.files[0]);
 		};
 
-	// mic path: live waveform + duration guidance (aim 5-15s)
+	// mic path: live waveform + duration guidance.
 	var live, liveCtx;
 	function drawLive (chunk) {
 		if (!live) { live = el ('rec-wave'); liveCtx = live.getContext ('2d'); }
@@ -1096,13 +1096,15 @@ if (w.PKTTS_UNSUPPORTED) {
 		setTimeout (function () { el ('record').disabled = false; }, 800);
 			el ('clone-confirm').disabled = true;
 			el ('tab-file').disabled = true;
-			setReportMessage ('', 'Read a couple of sentences naturally — aim for 6–10 seconds.');
+			var capSeconds = app.voiceCloneCapSeconds ? app.voiceCloneCapSeconds () : 10;
+			setReportMessage ('', 'Read a couple of sentences naturally — aim for 6–' + capSeconds + ' seconds.');
 		});
 	app.listenFor ('RecordProgress', function (p) {
 		el ('rec-time').textContent = p.seconds.toFixed (1) + 's';
-		var pct = Math.min (100, p.seconds / 15 * 100);
+		var capSeconds = app.voiceCloneCapSeconds ? app.voiceCloneCapSeconds () : 10;
+		var pct = Math.min (100, p.seconds / capSeconds * 100);
 		el ('rec-bar').style.width = pct + '%';
-		el ('rec-bar').className = p.seconds < 6 ? 'short' : (p.seconds <= 10 ? 'good' : 'long');
+		el ('rec-bar').className = p.seconds < 6 ? 'short' : (p.seconds <= capSeconds ? 'good' : 'long');
 		drawLive (p.latest);
 		if (p.seconds >= 25) app.fireEvent ('RecordStop');
 	});

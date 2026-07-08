@@ -36,7 +36,18 @@ function isMobileBrowser () {
 			Math.min (screen.width || 9999, screen.height || 9999) <= 900);
 }
 
+function voiceCloneCapSeconds () {
+	return isMobileBrowser () ? 10 : 12;
+}
+
+function capVoiceCloneAudio (audio) {
+	var samples = audio instanceof Float32Array ? audio : new Float32Array (audio);
+	var cap = voiceCloneCapSeconds () * SR;
+	return samples.length > cap ? samples.subarray (0, cap) : samples;
+}
+
 app.isMobileBrowser = isMobileBrowser;
+app.voiceCloneCapSeconds = voiceCloneCapSeconds;
 app.assetUrl = assetUrl;
 app.assetBase = ASSET_BASE;
 app.codeUrl = codeUrl;
@@ -223,7 +234,7 @@ function wavF32 (samples) {
 		var emb = copyBuffer (payload.emb);
 		var embCache = copyBuffer (payload.embCache);
 		var msg = { type: 'restoreVoice', key: payload.key, label: payload.label,
-			embDims: payload.embDims, emb: emb };
+			embDims: payload.embDims, emb: emb, capSeconds: voiceCloneCapSeconds () };
 		var transfer = [ emb ];
 		if (embCache) {
 			msg.embCache = embCache;
@@ -261,9 +272,7 @@ function wavF32 (samples) {
 		cloneInFlightKey = req.key;
 		app.fireEvent ('StopRequest');
 		app.fireEvent ('EngineProgress', { label: 'Freeing memory to clone', pct: 0.12 });
-		var samples = new Float32Array (req.audio);
-		var cap = 10 * SR;
-		if (samples.length > cap) samples = samples.subarray (0, cap);
+		var samples = capVoiceCloneAudio (req.audio);
 		var wavBytes = wavF32 (samples);
 		var wavForStore = wavBytes.buffer.slice (0);
 		stopEngineForRestart ();
@@ -338,8 +347,10 @@ function wavF32 (samples) {
 			return;
 		}
 		try {
-			var copy = req.audio.slice ();
-			worker.postMessage ({ type: 'clone', key: req.key, label: req.label, audio: copy },
+			var capSeconds = voiceCloneCapSeconds ();
+			var copy = capVoiceCloneAudio (req.audio).slice ();
+			worker.postMessage ({ type: 'clone', key: req.key, label: req.label,
+				audio: copy, capSeconds: capSeconds },
 				[ copy.buffer ]);
 		} catch (err) {
 			cloneInFlightKey = null;
@@ -799,9 +810,10 @@ function wavF32 (samples) {
 	app.validateVoice = function (audio24k) {
 		var n = audio24k.length, i;
 		var dur = n / SR;
+		var capSeconds = voiceCloneCapSeconds ();
 		var errors = [], warnings = [];
-		if (dur < 6) errors.push ('Too short — record at least 6 seconds (10–15s works best).');
-		if (dur > 10) warnings.push ('Longer than 10s — only the first 10 seconds are used (trim to choose which).');
+		if (dur < 6) errors.push ('Too short — record at least 6 seconds (6–' + capSeconds + 's works best).');
+		if (dur > capSeconds) warnings.push ('Longer than ' + capSeconds + 's — only the first ' + capSeconds + ' seconds are used (trim to choose which).');
 
 		var sumSq = 0, clipped = 0, peak = 0;
 		for (i = 0; i < n; ++i) {

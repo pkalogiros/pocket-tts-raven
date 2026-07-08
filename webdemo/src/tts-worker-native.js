@@ -25,6 +25,12 @@ function moduleWorker(url) {
   return worker;
 }
 
+function cloneCapSamples(capSeconds) {
+  const n = Number(capSeconds);
+  const seconds = Number.isFinite(n) && n > 0 ? Math.min(30, Math.max(1, n)) : 12;
+  return Math.round(seconds * SR);
+}
+
 function pttModuleOptions(assetBase, mainScriptUrl) {
   return {
     mainScriptUrlOrBlob: mainScriptUrl,
@@ -319,9 +325,9 @@ const handlers = {
     }
   },
 
-  async cloneInner({ key, label, audio }) {
+  async cloneInner({ key, label, audio, capSeconds }) {
     let samples = new Float32Array(audio);
-    const CAP = 10 * SR; // embedding prefix scales with length; keep sources tight
+    const CAP = cloneCapSamples(capSeconds); // embedding prefix scales with length; keep sources tight
     if (samples.length > CAP) samples = samples.subarray(0, CAP);
     const wavBytes = wavF32(samples);
     M.FS.writeFile(`/voices/${key}.wav`, wavBytes);
@@ -341,7 +347,7 @@ const handlers = {
     await serialize(() => handlers.cloneInner(payload));
   },
 
-  async restoreVoice({ key, label, embDims, emb, embCache }) {
+  async restoreVoice({ key, label, embDims, emb, embCache, capSeconds }) {
     if (embDims && embDims.length) {
       // TS-engine record: a raw float voice embedding. Write it as an EMB1
       // cache file — the engine then treats it exactly like a preset.
@@ -355,7 +361,7 @@ const handlers = {
       out.set(head); out.set(body, head.length);
       M.FS.writeFile(`/voices/.cache/${key}.emb`, out);
     } else {
-      const capBytes = 44 + 10 * SR * 4;
+      const capBytes = 44 + cloneCapSamples(capSeconds) * 4;
       let bytes = new Uint8Array(emb);
       if (bytes.length > capBytes) {
         bytes = bytes.slice(0, capBytes);
