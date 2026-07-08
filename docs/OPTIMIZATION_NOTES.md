@@ -30,7 +30,10 @@ tokenizer.model                          SentencePiece tokenizer
 
 The browser path uses the same AR/text/encoder assets, plus the portable
 `mimi_decoder_delta_int8.onnx` decoder because the Apple-only decoder custom
-ops do not help in WASM.
+ops do not help in WASM. Native Linux / clang-Windows follows the same
+pattern since the 2026-07-08 round: the attention custom op is portable, so
+those builds run `flow_lm_main_delta_attn_flow_int8.onnx` +
+`mimi_decoder_delta_int8.onnx`.
 
 ## Glossary
 
@@ -1151,3 +1154,53 @@ ship as a third feature-detected variant:
 Beyond that, the remaining ranked levers are int4 MatMulNBits weights
 (bandwidth + 40MB download, quality-gated) and a WebGPU decoder for
 mobile (frees both P-cores for AR; browser-only iteration).
+
+## 2026-07-08 optimization round — portable custom attention (ARM + x86-64)
+
+Until this round the custom-op header was gated `__APPLE__ ||
+__EMSCRIPTEN__`, so native Linux/Windows had `kCustomOpsAvailable = false`
+and the model selector fell all the way back to the *base*
+`flow_lm_main_int8.onnx` — every delta variant in the native set needs the
+attention op. Non-Apple was paying for a fallback nobody had measured.
+
+**Change.** Third backend in `pocket_tts_custom_attention.hpp` using
+GCC/Clang vector extensions (`__attribute__((vector_size(16)))`): one
+source path that compiles to NEON on ARM and SSE on x86-64, no per-arch
+intrinsics. Availability split into `kCustomAttentionAvailable` (any
+GCC/Clang target) and `kAccelConvAvailable` (Apple only) so non-Apple
+builds load the fast AR model but keep MLAS for the decoder.
+`-DPTT_FORCE_PORTABLE` builds the portable backend on macOS for A/B.
+
+**Measured** (M4 Max, page text, temp 0, single runs — deltas far above
+run noise):
+
+```text
+base-model fallback (= non-Apple before)      14.4x realtime
+portable AttentionTail + MLAS delta decoder   24.6x
+same with the NEON fast path disabled         23.4x   (x86 codegen proxy)
+Apple stock (Accelerate + AMX conv ops)       31-38x  (unchanged)
+portable backend driving the conv ops          4.6x   (why convs stay MLAS)
+```
+
+Numerics: the portable kernel matches Accelerate to ~1e-7 per step and
+hand-written NEON within 1-2% on timing; the same code compiled as
+x86_64 machine code passes the correctness check under Rosetta.
+
+**Why the conv ops stay Apple-only.** `AccelConv`/`ConvTransposeOverlap`
+win on Apple because Accelerate's sgemm runs on AMX. A portable GEMM at
+those shapes (512x512, K-tap accumulation) loses badly to ORT's threaded
+MLAS convolutions — same conclusion the WASM round reached. Off Apple,
+the delta decoder through MLAS is the right call.
+
+**Caveats / next levers for non-Apple:**
+
+- All x86 numbers above are codegen proxies measured on ARM. Real
+  x86 hardware (e.g. a Zen 3 box) still needs to confirm absolute perf;
+  correctness is already proven.
+- MSVC has no vector extensions — an MSVC build compiles with no custom
+  ops (old behavior). Use clang-cl on Windows for the fast path.
+- Ranked follow-ups if non-Apple needs more: fp16 KV cache in the
+  attention op (halves the per-token cache read — the AR scan is
+  bandwidth-bound), splitting the 16 attention heads across 2-4 threads,
+  32-byte vectors under `__AVX2__`, and shipping x86 binaries as
+  `-march=x86-64-v3`.

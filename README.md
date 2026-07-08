@@ -96,7 +96,9 @@ default sibling location.
 
 - CMake 3.28+, a C++17 compiler (dependencies are fetched by CMake)
 - [uv](https://docs.astral.sh/uv/) for the model-preparation scripts
-- Any OS for the runtime; the fused-conv custom ops light up on Apple silicon
+- Any OS for the runtime; the custom attention op accelerates all
+  GCC/Clang targets (ARM + x86-64), and the fused-conv custom ops
+  additionally light up on Apple silicon
 
 ## Design: fast models, stock runtime
 

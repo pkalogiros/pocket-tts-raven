@@ -24,10 +24,17 @@ Outputs land in the repo root:
 - `libptt_custom_ops.dylib` — the custom ORT ops as a loadable library,
   used only by python-side model verification (macOS only)
 
-The custom ops (`AttentionTail`, `DecoderConvTransposeOverlap`, `AccelConv`,
-`AccelConvElu`, ...) are Apple-only (Accelerate/AMX). On Linux/Windows the
-binary builds and runs but automatically falls back to the plain delta
-models — slower, same audio.
+The attention custom ops (`AttentionTail`, `DecoderAttentionTail`) are
+portable: Accelerate on Apple, WASM-SIMD in the browser, and compiler
+vector extensions (NEON/SSE) on any other GCC/Clang target — so Linux and
+clang-built Windows load the fast `flow_lm_main_delta_attn_flow` AR model
+too. The conv ops (`DecoderConvTransposeOverlap`, `AccelConv`,
+`AccelConvElu`) stay Apple-only: they need Accelerate/AMX-class GEMM to
+beat ORT's MLAS convolutions, so other platforms automatically keep the
+plain `mimi_decoder_delta` decoder — slower decoder, same audio. MSVC has
+no vector extensions; an MSVC build falls back to no custom ops entirely
+(use clang-cl on Windows). `-DPTT_FORCE_PORTABLE` builds the portable
+backend on macOS for A/B testing.
 
 ## Run
 
