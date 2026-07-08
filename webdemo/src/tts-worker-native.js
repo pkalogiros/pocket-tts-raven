@@ -321,7 +321,7 @@ const handlers = {
 
   async cloneInner({ key, label, audio }) {
     let samples = new Float32Array(audio);
-    const CAP = 15 * SR; // embedding prefix scales with length; keep sources tight
+    const CAP = 10 * SR; // embedding prefix scales with length; keep sources tight
     if (samples.length > CAP) samples = samples.subarray(0, CAP);
     const wavBytes = wavF32(samples);
     M.FS.writeFile(`/voices/${key}.wav`, wavBytes);
@@ -341,7 +341,7 @@ const handlers = {
     await serialize(() => handlers.cloneInner(payload));
   },
 
-  async restoreVoice({ key, label, embDims, emb }) {
+  async restoreVoice({ key, label, embDims, emb, embCache }) {
     if (embDims && embDims.length) {
       // TS-engine record: a raw float voice embedding. Write it as an EMB1
       // cache file — the engine then treats it exactly like a preset.
@@ -365,7 +365,12 @@ const handlers = {
         dv.setUint32(40, bytes.length - 44, true);
       }
       M.FS.writeFile(`/voices/${key}.wav`, bytes);
-      needsEncoder.add(key);
+      if (embCache) {
+        M.FS.writeFile(`/voices/.cache/${key}.emb`, new Uint8Array(embCache));
+        needsEncoder.delete(key);
+      } else {
+        needsEncoder.add(key);
+      }
     }
     post("voice", { key, label, builtin: false });
   },

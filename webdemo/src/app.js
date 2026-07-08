@@ -5,10 +5,16 @@
 
 var SR = 24000;
 var ASSET_BASE = String (w.PKTTS_ASSET_BASE || '').replace (/\/+$/, '');
+var CODE_BASE = String (w.PKTTS_CODE_BASE || '').replace (/\/+$/, '');
 
 function assetUrl (path) {
 	path = String (path || '').replace (/^\/+/, '');
 	return ASSET_BASE ? ASSET_BASE + '/' + path : new URL (path, w.location.href).href;
+}
+
+function codeUrl (path) {
+	path = String (path || '').replace (/^\/+/, '');
+	return CODE_BASE ? CODE_BASE + '/' + path : new URL (path, w.location.href).href;
 }
 
 	function moduleWorker (url) {
@@ -33,6 +39,9 @@ function isMobileBrowser () {
 app.isMobileBrowser = isMobileBrowser;
 app.assetUrl = assetUrl;
 app.assetBase = ASSET_BASE;
+app.codeUrl = codeUrl;
+
+if (w.PKTTS_UNSUPPORTED) return;
 
 function copyBuffer (buf) {
 	if (!buf) return null;
@@ -43,13 +52,34 @@ function copyBuffer (buf) {
 	return null;
 }
 
+function sleep (ms) {
+	return new Promise (function (resolve) { setTimeout (resolve, ms); });
+}
+
+function wavF32 (samples) {
+	var head = new ArrayBuffer (44);
+	var dv = new DataView (head);
+	function str (o, s) { for (var i = 0; i < s.length; ++i) dv.setUint8 (o + i, s.charCodeAt (i)); }
+	var bytes = samples.length * 4;
+	str (0, 'RIFF'); dv.setUint32 (4, 36 + bytes, true); str (8, 'WAVE');
+	str (12, 'fmt '); dv.setUint32 (16, 16, true); dv.setUint16 (20, 3, true);
+	dv.setUint16 (22, 1, true); dv.setUint32 (24, SR, true);
+	dv.setUint32 (28, SR * 4, true); dv.setUint16 (32, 4, true); dv.setUint16 (34, 32, true);
+	str (36, 'data'); dv.setUint32 (40, bytes, true);
+	var out = new Uint8Array (44 + bytes);
+	out.set (new Uint8Array (head));
+	out.set (new Uint8Array (samples.buffer, samples.byteOffset, bytes), 44);
+	return out;
+}
+
 // ── EngineBridge: the TTS worker <-> event bus ──────────────────────────────
 (function () {
 	// Engine selection: ?engine=native|ts. Default is "native" (the full
 	// pocket_tts.cpp compiled with Emscripten); "ts" is the JS orchestration.
 	// Only an explicit query param is persisted (key v2: earlier auto-persist
 	// wrote 'ts' and would pin old visitors to the slow engine).
-	var qp = new URLSearchParams (w.location.search).get ('engine');
+	var q = new URLSearchParams (w.location.search);
+	var qp = q.get ('engine');
 	if (qp === 'ts' || qp === 'native' || qp === 'split') {
 		try { localStorage.setItem ('pktts_engine2', qp); } catch (e) {}
 	}
@@ -60,19 +90,32 @@ function copyBuffer (buf) {
 	// still wins (testing); only persisted pins are ignored.
 	if (engine !== 'native' && !qp && w.matchMedia ('(max-width: 720px)').matches) engine = 'native';
 	app.state.engine = engine;
-	var worker = moduleWorker (assetUrl (engine === 'split' ? 'src/tts-worker-split.js'
-		: engine === 'native' ? 'src/tts-worker-native.js'
-		: 'src/tts-worker.js'));
+	var mobileCloneRestart = engine === 'native' && isMobileBrowser () &&
+		q.get ('mobileCloneRestart') !== '0' && !w.PKTTS_DISABLE_MOBILE_CLONE_RESTART;
+	var worker = null;
+	var prewarmSent = false;
+	var shuttingDown = false;
+	var cloneInFlightKey = null;
 
-	worker.onerror = function (e) {
+	function engineWorkerUrl () {
+		return codeUrl (engine === 'split' ? 'src/tts-worker-split.js'
+			: engine === 'native' ? 'src/tts-worker-native.js'
+			: 'src/tts-worker.js');
+	}
+
+	function createEngineWorker () {
+		var next = moduleWorker (engineWorkerUrl ());
+		next.onerror = function (e) {
+			if (next !== worker) return;
 		// a wasm OOM abort kills the module irrecoverably - say so plainly
 		var failedCloneKey = cloneInFlightKey;
 		cloneInFlightKey = null;
 		app.fireEvent ('EngineError', { during: 'engine',
 			key: failedCloneKey,
 			message: (e && e.message) || 'engine crashed - reload the page' });
-	};
-	worker.onmessage = function (e) {
+		};
+		next.onmessage = function (e) {
+			if (next !== worker) return;
 		var d = e.data;
 		switch (d.type) {
 			case 'progress':    app.fireEvent ('EngineProgress', d); break;
@@ -123,11 +166,134 @@ function copyBuffer (buf) {
 				app.fireEvent ('EngineError', d);
 				break;
 		}
-	};
+		};
 
-	var prewarmSent = false;
-	var shuttingDown = false;
-	var cloneInFlightKey = null;
+		// On-device tuning knobs: ?pool=N (thread pool), ?spin=0 (no spin-wait),
+		// ?variant=fixed|growth (memory layout), ?bench=1 (isolated timings).
+		var spinParam = q.get ('spin');
+		var spinDefault = /Windows/i.test (navigator.userAgent || '') ? 0 : 1;
+		next.postMessage ({ type: 'init',
+			assetBase: ASSET_BASE,
+			modelsUrl: assetUrl ('models').replace (/\/$/, ''),
+			threads: Math.min (4, (navigator.hardwareConcurrency || 4)),
+			pool: parseInt (q.get ('pool'), 10) || 0,
+			arPool: parseInt (q.get ('arpool'), 10) || 0,
+			decPool: parseInt (q.get ('decpool'), 10) || 0,
+			spin: spinParam === '0' ? 0 : spinParam === '1' ? 1 : spinDefault,
+			variant: q.get ('variant') || '',
+			bench: q.get ('bench') === '1' });
+		return next;
+	}
+
+	function startEngine () {
+		prewarmSent = false;
+		app.state.ready = false;
+		worker = createEngineWorker ();
+	}
+
+	startEngine ();
+
+	function stopEngineForRestart () {
+		if (!worker) return;
+		app.state.ready = false;
+		app.fireEvent ('EngineRestarting');
+		try { worker.postMessage ({ type: 'stop' }); } catch (e) {}
+		try { worker.postMessage ({ type: 'shutdown' }); } catch (e) {}
+		try { worker.terminate (); } catch (e) {}
+		worker = null;
+	}
+
+	function waitForEngineReady () {
+		return new Promise (function (resolve, reject) {
+			var timer = setTimeout (function () {
+				app.stopListening ('EngineReady', done);
+				reject (new Error ('engine reload timed out'));
+			}, 30000);
+			function done () {
+				clearTimeout (timer);
+				app.stopListening ('EngineReady', done);
+				resolve ();
+			}
+			app.listenFor ('EngineReady', done);
+		});
+	}
+
+	function postVoiceRestore (payload) {
+		if (!worker || !payload || !payload.emb) return;
+		var emb = copyBuffer (payload.emb);
+		var embCache = copyBuffer (payload.embCache);
+		var msg = { type: 'restoreVoice', key: payload.key, label: payload.label,
+			embDims: payload.embDims, emb: emb };
+		var transfer = [ emb ];
+		if (embCache) {
+			msg.embCache = embCache;
+			transfer.push (embCache);
+		}
+		worker.postMessage (msg, transfer);
+	}
+
+	function restoreSessionVoices () {
+		Object.keys (app.state.voicePayloads || {}).forEach (function (key) {
+			postVoiceRestore (app.state.voicePayloads[key]);
+		});
+	}
+
+	function encodeVoiceInPageWorker (key, wavBytes) {
+		return new Promise (function (resolve, reject) {
+			var enc = moduleWorker (codeUrl ('src/encode-worker.js'));
+			enc.onmessage = function (e) {
+				enc.terminate ();
+				if (e.data && e.data.ok) resolve (e.data.emb);
+				else reject (new Error ((e.data && e.data.message) || 'voice encoder failed'));
+			};
+			enc.onerror = function (e) {
+				enc.terminate ();
+				reject (new Error ((e && e.message) || 'voice encoder crashed'));
+			};
+			var pool = Math.min (2, navigator.hardwareConcurrency || 2);
+			enc.postMessage ({ assetBase: ASSET_BASE,
+				modelsUrl: assetUrl ('models').replace (/\/$/, ''),
+				wav: wavBytes.buffer, key: key, pool: pool }, [ wavBytes.buffer ]);
+		});
+	}
+
+	function cloneWithMobileRestart (req) {
+		cloneInFlightKey = req.key;
+		app.fireEvent ('StopRequest');
+		app.fireEvent ('EngineProgress', { label: 'Freeing memory to clone', pct: 0.12 });
+		var samples = new Float32Array (req.audio);
+		var cap = 10 * SR;
+		if (samples.length > cap) samples = samples.subarray (0, cap);
+		var wavBytes = wavF32 (samples);
+		var wavForStore = wavBytes.buffer.slice (0);
+		stopEngineForRestart ();
+		sleep (250).then (function () {
+			app.fireEvent ('EngineProgress', { label: 'Encoding voice', pct: 0.32 });
+			return encodeVoiceInPageWorker (req.key, wavBytes);
+		}).then (function (emb) {
+			app.fireEvent ('EngineProgress', { label: 'Restarting engine', pct: 0.72 });
+			var payload = { key: req.key, label: req.label, embDims: null,
+				emb: wavForStore, embCache: emb.slice (0) };
+			app.fireEvent ('VoicePersist', payload);
+			startEngine ();
+			return waitForEngineReady ().then (function () {
+				app.fireEvent ('EngineProgress', { label: 'Restoring voice', pct: 0.9 });
+				restoreSessionVoices ();
+			});
+		}).catch (function (err) {
+			cloneInFlightKey = null;
+			if (!shuttingDown) {
+				if (worker) {
+					try { worker.terminate (); } catch (e) {}
+					worker = null;
+				}
+				startEngine ();
+			}
+			app.fireEvent ('EngineError', { during: 'clone', key: req.key,
+				message: String (err && err.message || err) });
+		});
+	}
+
 	function shutdownPage (event) {
 		if (event && event.persisted) return;
 		if (shuttingDown) return;
@@ -145,17 +311,17 @@ function copyBuffer (buf) {
 	}, { capture: true });
 
 	app.listenFor ('StopRequest', function () {
-		if (shuttingDown) return;
+		if (shuttingDown || !worker) return;
 		worker.postMessage ({ type: 'stop' });
 	});
 	// Warm a voice the moment it's selected: by the time the user has typed
 	// (or reached the Speak button), its conditioning cache is ready.
 	app.listenFor ('VoiceSelected', function (key) {
-		if (shuttingDown) return;
+		if (shuttingDown || !worker) return;
 		if (app.state.ready) worker.postMessage ({ type: 'prewarmVoice', voiceKey: key });
 	});
 	app.listenFor ('SpeakRequest', function (req) {
-		if (shuttingDown) return;
+		if (shuttingDown || !worker) return;
 		worker.postMessage ({ type: 'speak', text: req.text, voiceKey: req.voiceKey,
 			temperature: (req.temperature === 0 || req.temperature > 0) ? req.temperature : 0.45,
 			seed: (Math.random () * 0xffffffff) >>> 0 });
@@ -167,6 +333,10 @@ function copyBuffer (buf) {
 			return;
 		}
 		cloneInFlightKey = req.key;
+		if (mobileCloneRestart) {
+			cloneWithMobileRestart (req);
+			return;
+		}
 		try {
 			var copy = req.audio.slice ();
 			worker.postMessage ({ type: 'clone', key: req.key, label: req.label, audio: copy },
@@ -178,61 +348,55 @@ function copyBuffer (buf) {
 		}
 	});
 	app.listenFor ('VoiceRestore', function (v) {
-		if (shuttingDown) return;
-		worker.postMessage ({ type: 'restoreVoice', key: v.key, label: v.label,
-			embDims: v.embDims, emb: v.emb }, [ v.emb ]);
+		if (shuttingDown || !worker) return;
+		postVoiceRestore (v);
 	});
 	app.listenFor ('VoiceDrop', function (key) {
-		if (shuttingDown) return;
+		if (shuttingDown || !worker) return;
 		worker.postMessage ({ type: 'dropVoice', key: key });
 	});
 	app.listenFor ('RequestVoiceExport', function (v) {
-		if (shuttingDown) return false;
+		if (shuttingDown || !worker) return false;
 		worker.postMessage ({ type: 'exportVoice', key: v.key, label: v.label });
 		return true;
 	});
 
-		// On-device tuning knobs: ?pool=N (thread pool), ?spin=0 (no spin-wait),
-		// ?variant=fixed|growth (memory layout), ?bench=1 (isolated timings).
-		var q = new URLSearchParams (w.location.search);
-		var spinParam = q.get ('spin');
-		var spinDefault = /Windows/i.test (navigator.userAgent || '') ? 0 : 1;
-		worker.postMessage ({ type: 'init',
-			assetBase: ASSET_BASE,
-			modelsUrl: assetUrl ('models').replace (/\/$/, ''),
-			threads: Math.min (4, (navigator.hardwareConcurrency || 4)),
-			pool: parseInt (q.get ('pool'), 10) || 0,
-			arPool: parseInt (q.get ('arpool'), 10) || 0,
-			decPool: parseInt (q.get ('decpool'), 10) || 0,
-			spin: spinParam === '0' ? 0 : spinParam === '1' ? 1 : spinDefault,
-			variant: q.get ('variant') || '',
-			bench: q.get ('bench') === '1' });
 	})();
 
-// ── VoicesStore: OPFS persistence for cloned voices ─────────────────────────
-(function () {
-	function dirp () { return navigator.storage.getDirectory ().then (function (r) {
-		return r.getDirectoryHandle ('voices', { create: true }); }); }
+	// ── VoicesStore: OPFS persistence for cloned voices ─────────────────────────
+	(function () {
+		function dirp () {
+			if (!navigator.storage || !navigator.storage.getDirectory) {
+				return Promise.reject (new Error ('OPFS unavailable'));
+			}
+			return navigator.storage.getDirectory ().then (function (r) {
+				return r.getDirectoryHandle ('voices', { create: true });
+			});
+		}
 
 	app.listenFor ('VoicePersist', function (v) {
 		var copy = copyBuffer (v.emb);
+		var embCache = copyBuffer (v.embCache);
 		if (copy) {
 			app.state.voicePayloads[v.key] = {
-				key: v.key, label: v.label, embDims: v.embDims || null, emb: copy
+				key: v.key, label: v.label, embDims: v.embDims || null,
+				emb: copy, embCache: embCache
 			};
 		}
-		dirp ().then (function (dir) {
-			return dir.getFileHandle (v.key + '.json', { create: true }).then (function (fh) {
-				return fh.createWritable ();
-			}).then (function (ws) {
-				var meta = JSON.stringify ({ key: v.key, label: v.label, embDims: v.embDims });
-				return ws.write (meta).then (function () { return ws.close (); });
-			}).then (function () {
-				return dir.getFileHandle (v.key + '.bin', { create: true });
-			}).then (function (fh) { return fh.createWritable (); })
-			.then (function (ws) {
-				return ws.write (v.emb).then (function () { return ws.close (); });
-			});
+		dirp ().then (async function (dir) {
+			var meta = JSON.stringify ({ key: v.key, label: v.label,
+				embDims: v.embDims, hasEmbCache: !!embCache });
+			var fh = await dir.getFileHandle (v.key + '.json', { create: true });
+			var ws = await fh.createWritable ();
+			await ws.write (meta); await ws.close ();
+			fh = await dir.getFileHandle (v.key + '.bin', { create: true });
+			ws = await fh.createWritable ();
+			await ws.write (copy || v.emb); await ws.close ();
+			if (embCache) {
+				fh = await dir.getFileHandle (v.key + '.emb', { create: true });
+				ws = await fh.createWritable ();
+				await ws.write (embCache); await ws.close ();
+			}
 		}).catch (function () { /* OPFS unavailable: session-only voices */ });
 	});
 
@@ -241,7 +405,8 @@ function copyBuffer (buf) {
 		dirp ().then (function (dir) {
 			return Promise.allSettled ([
 				dir.removeEntry (key + '.json'),
-				dir.removeEntry (key + '.bin')
+				dir.removeEntry (key + '.bin'),
+				dir.removeEntry (key + '.emb')
 			]);
 		}).catch (function () {});
 	});
@@ -253,23 +418,33 @@ function copyBuffer (buf) {
 				try {
 					var meta = JSON.parse (await (await fh.getFile ()).text ());
 					var bin = await (await (await dir.getFileHandle (meta.key + '.bin')).getFile ()).arrayBuffer ();
+					var embCache = null;
+					if (meta.hasEmbCache) {
+						try {
+							embCache = await (await (await dir.getFileHandle (meta.key + '.emb')).getFile ()).arrayBuffer ();
+						} catch (e) { embCache = null; }
+					}
 					app.state.voicePayloads[meta.key] = {
-						key: meta.key, label: meta.label, embDims: meta.embDims || null, emb: bin.slice (0)
+						key: meta.key, label: meta.label, embDims: meta.embDims || null,
+						emb: bin.slice (0), embCache: embCache ? embCache.slice (0) : null
 					};
 					app.fireEvent ('VoiceRestore', { key: meta.key, label: meta.label,
-						embDims: meta.embDims, emb: bin });
+						embDims: meta.embDims, emb: bin,
+						embCache: embCache });
 				} catch (e) { /* skip broken entries */ }
 			}
 		}).catch (function () {});
 	});
 })();
 
-// ── Player: streaming playback through an AudioWorklet ring buffer ──────────
-	(function () {
-		var ctx = null, node = null, pending = [];
-		var closing = false;
-		var idleCloseTimer = 0;
-		var playbackActive = false;
+	// ── Player: streaming playback through an AudioWorklet ring buffer ──────────
+		(function () {
+			var ctx = null, node = null, pending = [];
+				var closing = false;
+				var idleCloseTimer = 0;
+				var playbackActive = false;
+				var pendingEnd = false;
+				var playbackFailed = false;
 
 	// Mobile pre-buffer: phones generate closer to realtime and can stutter
 	// if playback starts on the first chunk. Hold ~1s of audio before the
@@ -283,11 +458,13 @@ function copyBuffer (buf) {
 			idleCloseTimer = 0;
 		}
 
-		function closePlayer () {
-			clearIdleClose ();
-			playbackActive = false;
-			preBuf = []; preCount = 0; buffering = false;
-			var n = node, c = ctx;
+			function closePlayer () {
+				clearIdleClose ();
+				playbackActive = false;
+				pending = [];
+				pendingEnd = false;
+				preBuf = []; preCount = 0; buffering = false;
+				var n = node, c = ctx;
 			node = null; ctx = null;
 			if (n) {
 				try { n.port.postMessage ({ flush: true, end: true }); } catch (e) {}
@@ -305,11 +482,38 @@ function copyBuffer (buf) {
 			idleCloseTimer = setTimeout (closePlayer, 750);
 		}
 
-		function flushPreBuffer () {
-			if (!node) return;
-			for (var i = 0; i < preBuf.length; ++i) node.port.postMessage (preBuf[i]);
-			preBuf = []; preCount = 0; buffering = false;
-		}
+			function flushPreBuffer () {
+				if (!node) return;
+				for (var i = 0; i < preBuf.length; ++i) node.port.postMessage (preBuf[i]);
+				preBuf = []; preCount = 0; buffering = false;
+			}
+
+				function pushChunkToPlayer (copy) {
+					if (playbackFailed) return;
+					if (!node) {
+						pending.push (copy);
+						return;
+				}
+				if (buffering) {
+					preBuf.push (copy);
+					preCount += copy.length;
+					if (preCount >= PREBUFFER_SAMPLES) flushPreBuffer ();
+					return;
+				}
+				node.port.postMessage (copy);
+			}
+
+			function flushPendingToPlayer () {
+				if (!node) return;
+				var q = pending;
+				pending = [];
+				for (var i = 0; i < q.length; ++i) pushChunkToPlayer (q[i]);
+				if (pendingEnd) {
+					pendingEnd = false;
+					if (buffering) flushPreBuffer ();
+					node.port.postMessage ({ end: true });
+				}
+			}
 
 	// Small synthesized room: exponentially decaying noise as the impulse
 	// response. Playback-only — downloads and the AudioMass handoff stay dry.
@@ -332,7 +536,7 @@ function copyBuffer (buf) {
 				if (ctx && !node) closePlayer ();
 				if (ctx) return Promise.resolve ();
 				ctx = new AudioContext ({ sampleRate: SR });
-				return ctx.audioWorklet.addModule (assetUrl ('src/playback-worklet.js')).then (function () {
+				return ctx.audioWorklet.addModule (codeUrl ('src/playback-worklet.js')).then (function () {
 					node = new AudioWorkletNode (ctx, 'pktts-player');
 
 			var dry = ctx.createGain ();
@@ -340,17 +544,19 @@ function copyBuffer (buf) {
 			node.connect (dry);
 			dry.connect (ctx.destination);
 
-			var wetHP = ctx.createBiquadFilter ();
-			wetHP.type = 'highpass';
-			wetHP.frequency.value = 260; // keep the tail out of the mud
-			var verb = ctx.createConvolver ();
-			verb.buffer = makeImpulse (ctx, 1.3, 3.4);
-				var wet = ctx.createGain ();
-				wet.gain.value = 0.2;
-				node.connect (wetHP);
-				wetHP.connect (verb);
-				verb.connect (wet);
-				wet.connect (ctx.destination);
+				if (!isMobile) {
+					var wetHP = ctx.createBiquadFilter ();
+					wetHP.type = 'highpass';
+					wetHP.frequency.value = 260; // keep the tail out of the mud
+					var verb = ctx.createConvolver ();
+					verb.buffer = makeImpulse (ctx, 1.3, 3.4);
+					var wet = ctx.createGain ();
+					wet.gain.value = 0.2;
+					node.connect (wetHP);
+					wetHP.connect (verb);
+					verb.connect (wet);
+					wet.connect (ctx.destination);
+				}
 
 					node.port.onmessage = function (e) {
 						if (e.data.ended) {
@@ -366,38 +572,40 @@ function copyBuffer (buf) {
 				});
 			}
 
-			function reportPlaybackError (err) {
-				if (closing) return;
-				playbackActive = false;
-				console.warn ('[pktts] playback setup failed', err);
-				app.fireEvent ('EngineError', { during: 'audio playback', message: String (err && err.message || err) });
-			}
+				function reportPlaybackError (err) {
+					if (closing) return;
+					playbackActive = false;
+					playbackFailed = true;
+					console.warn ('[pktts] playback setup failed', err);
+					app.fireEvent ('EngineError', { during: 'audio playback', message: String (err && err.message || err) });
+				}
 	
-		app.listenFor ('SpeakStarted', function () {
-			if (closing) return;
-			playbackActive = true;
-			preBuf = []; preCount = 0; buffering = isMobile;
-			ensure ().then (function () {
-				if (closing || !ctx || !node) return;
-				ctx.resume ();
-				node.port.postMessage ({ flush: true });
-			}).catch (reportPlaybackError);
+			app.listenFor ('SpeakStarted', function () {
+					if (closing) return;
+					playbackActive = true;
+					playbackFailed = false;
+					pending = [];
+					pendingEnd = false;
+				preBuf = []; preCount = 0; buffering = isMobile;
+				ensure ().then (function () {
+					if (closing || !ctx || !node) return;
+					ctx.resume ();
+					node.port.postMessage ({ flush: true });
+					flushPendingToPlayer ();
+				}).catch (reportPlaybackError);
+			});
+		app.listenFor ('SpeakChunk', function (samples) {
+			var copy = samples.slice ();
+			pushChunkToPlayer (copy);
 		});
-	app.listenFor ('SpeakChunk', function (samples) {
-		if (!node) return;
-		var copy = samples.slice ();
-		if (buffering) {
-			preBuf.push (copy);
-			preCount += copy.length;
-			if (preCount >= PREBUFFER_SAMPLES) flushPreBuffer ();
-			return;
-		}
-		node.port.postMessage (copy);
-	});
-	app.listenFor ('SpeakDone', function () {
-		if (!node) return;
-		if (buffering) flushPreBuffer (); // shorter than the prebuffer: release it all
-		node.port.postMessage ({ end: true });
+			app.listenFor ('SpeakDone', function () {
+				if (playbackFailed) return;
+				if (!node) {
+					pendingEnd = true;
+					return;
+			}
+			if (buffering) flushPreBuffer (); // shorter than the prebuffer: release it all
+			node.port.postMessage ({ end: true });
 	});
 		app.listenFor ('ReplayRequest', function () {
 			var a = app.state.lastAudio;
@@ -423,6 +631,9 @@ function copyBuffer (buf) {
 	// AudioContexts (ours at 24k, the editor's at 48k) share one device and
 	// cost realtime mixing headroom that reads as editor sluggishness.
 		app.listenFor ('AudioMassOpen', function () {
+			closePlayer ();
+		});
+		app.listenFor ('AudioMassOpenForClone', function () {
 			closePlayer ();
 		});
 	// While recording, silence our output context: on iOS the audio session
@@ -452,14 +663,19 @@ function copyBuffer (buf) {
 		ctx = null; node = null; stream = null; chunks = [];
 	}
 
-	app.listenFor ('RecordStart', function () {
-		if (recording || stream || ctx) return;
-		var mobile = isMobileBrowser ();
-		stopRequested = false;
-		var seq = ++startSeq;
-		navigator.mediaDevices.getUserMedia ({ audio: {
-			echoCancellation: false, noiseSuppression: false, autoGainControl: !mobile
-		}}).then (function (s) {
+		app.listenFor ('RecordStart', function () {
+			if (recording || stream || ctx) return;
+			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+				app.fireEvent ('RecordError', 'microphone API unavailable');
+				return;
+			}
+			var mobile = isMobileBrowser ();
+			stopRequested = false;
+			var seq = ++startSeq;
+			var audioConstraints = mobile
+				? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+				: { echoCancellation: false, noiseSuppression: true, autoGainControl: true };
+		navigator.mediaDevices.getUserMedia ({ audio: audioConstraints, video: false }).then (function (s) {
 			if (stopRequested || seq !== startSeq) {
 				stopStream (s);
 				return Promise.reject ({ canceled: true });
@@ -467,7 +683,7 @@ function copyBuffer (buf) {
 			stream = s;
 			ctx = new AudioContext ();
 			ctx.resume (); // iOS creates contexts suspended even inside a gesture
-			return ctx.audioWorklet.addModule (assetUrl ('vendor/recorder-worklet.js')).then (function () {
+			return ctx.audioWorklet.addModule (codeUrl ('vendor/recorder-worklet.js')).then (function () {
 				if (stopRequested || seq !== startSeq) {
 					cleanupRecorder ();
 					return;
@@ -488,11 +704,12 @@ function copyBuffer (buf) {
 				srcNode.connect (node);
 				app.fireEvent ('RecordStarted', { sampleRate: ctx.sampleRate });
 			});
-		}).catch (function (err) {
-			if ((err && err.canceled) || stopRequested || seq !== startSeq) return;
-			app.fireEvent ('RecordError', String (err && err.message || err));
+			}).catch (function (err) {
+				if (stream || ctx) cleanupRecorder ();
+				if ((err && err.canceled) || stopRequested || seq !== startSeq) return;
+				app.fireEvent ('RecordError', String (err && err.message || err));
+			});
 		});
-	});
 
 	function finish () {
 		if (!ctx || !stream) return;

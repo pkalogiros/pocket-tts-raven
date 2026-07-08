@@ -26,6 +26,26 @@ function syncVoiceDownloadButton () {
 	b.hidden = (app.isMobileBrowser && app.isMobileBrowser ()) || app.state.engine === 'ts' || !v || !!v.builtin;
 }
 
+if (w.PKTTS_UNSUPPORTED) {
+	function showUnsupported () {
+		var overlay = el ('overlay');
+		if (overlay) {
+			overlay.classList.remove ('gone', 'hidden');
+			overlay.classList.add ('unsupported');
+		}
+		var msg = el ('unsupported-msg');
+		if (msg && w.PKTTS_UNSUPPORTED) {
+			var body = msg.querySelector ('span');
+			if (body) body.textContent = w.PKTTS_UNSUPPORTED;
+		}
+		var status = el ('status');
+		if (status) status.textContent = 'Browser not supported';
+	}
+	if (d.readyState === 'loading') d.addEventListener ('DOMContentLoaded', showUnsupported);
+	else showUnsupported ();
+	return;
+}
+
 // ── Version stamp: which build is this client actually running? ─────────────
 (function () {
 	fetch ('version').then (function (r) { return r.text (); }).then (function (v) {
@@ -170,6 +190,19 @@ function syncVoiceDownloadButton () {
 		var speechActive = false;
 		var t0 = 0, firstChunkAt = 0;
 	var RAVEN_REJECT = 'THE RAVEN DOES NOT APPROVE OF THIS';
+
+		function assembleParts () {
+			var total = 0, i;
+			for (i = 0; i < parts.length; ++i) total += parts[i].length;
+			if (!total) {
+				parts = [];
+				return null;
+			}
+			var all = new Float32Array (total), o = 0;
+			for (i = 0; i < parts.length; ++i) { all.set (parts[i], o); o += parts[i].length; }
+			parts = [];
+			return { audio: all, total: total };
+		}
 
 	function decodeB64 (s) { return atob (s); }
 	function decodeB64List (list) {
@@ -325,28 +358,32 @@ function syncVoiceDownloadButton () {
 		}
 	}
 
-	function syncButton () {
-		el ('speak').textContent = (app.state.speaking || app.state.playing) ? 'Stop' : 'Speak';
-	}
-	function requestSpeak () {
-		if (app.state.speaking || app.state.playing) {
-			// Stop halts generation AND playback; button returns to Speak
-			// when the (flushed) playback signals it has ended.
-			app.fireEvent ('StopRequest');
-			return;
+		function syncButton () {
+			el ('speak').textContent = (app.state.speaking || app.state.playing) ? 'Stop' : 'Speak';
 		}
-		if (!app.state.ready) return;
-		var text = el ('text').value.trim ();
-		if (!text) { toast ('Type something first.'); return; }
-		if (!app.state.activeVoice) { toast ('Pick a voice first.'); return; }
-		if (blockedText (text)) {
-			toast (RAVEN_REJECT, 4200);
+		var lastSpeakRequestAt = 0;
+		function requestSpeak () {
+			if (app.state.speaking || app.state.playing) {
+				// Stop halts generation AND playback; button returns to Speak
+				// when the (flushed) playback signals it has ended.
+				app.fireEvent ('StopRequest');
+				return;
+			}
+			if (!app.state.ready) return;
+			var now = performance.now ();
+			if (now - lastSpeakRequestAt < 300) return;
+			var text = el ('text').value.trim ();
+			if (!text) { toast ('Type something first.'); return; }
+			if (!app.state.activeVoice) { toast ('Pick a voice first.'); return; }
+			if (blockedText (text)) {
+				toast (RAVEN_REJECT, 4200);
 			el ('status').textContent = RAVEN_REJECT;
-			return;
-		}
-		speakableCheck (text);
-		app.fireEvent ('SpeakRequest', { text: text, voiceKey: app.state.activeVoice,
-			temperature: app.state.temperature });
+				return;
+			}
+			lastSpeakRequestAt = now;
+			speakableCheck (text);
+			app.fireEvent ('SpeakRequest', { text: text, voiceKey: app.state.activeVoice,
+				temperature: app.state.temperature });
 	}
 	el ('speak').onclick = requestSpeak;
 
@@ -379,6 +416,11 @@ function syncVoiceDownloadButton () {
 		el ('speak').disabled = false;
 		el ('speak').title = 'Cmd/Ctrl+Enter';
 		el ('status').textContent = 'Ready';
+	});
+	app.listenFor ('EngineRestarting', function () {
+		el ('speak').disabled = true;
+		el ('speak').title = 'Engine is reloading';
+		el ('status').textContent = 'Reloading engine…';
 	});
 	app.listenFor ('EngineBench', function (b) {
 		// visible on-device (?bench=1): per-frame budget is AR + dec/frame;
@@ -415,14 +457,12 @@ function syncVoiceDownloadButton () {
 	app.listenFor ('SpeakDone', function () {
 		if (!speechActive) { parts = []; return; }
 		speechActive = false;
-		var total = 0, i;
-		for (i = 0; i < parts.length; ++i) total += parts[i].length;
-		var all = new Float32Array (total), o = 0;
-		for (i = 0; i < parts.length; ++i) { all.set (parts[i], o); o += parts[i].length; }
-		app.state.lastAudio = all;
+		var assembled = assembleParts ();
+		if (!assembled) return;
+		app.state.lastAudio = assembled.audio;
 		app.state.speaking = false;
 		var wall = (performance.now () - t0) / 1000;
-		var dur = total / SR;
+		var dur = assembled.total / SR;
 		syncButton (); // stays "Stop" while playback continues
 		el ('status').textContent = dur.toFixed (1) + 's of audio in ' + wall.toFixed (1) +
 			's (' + (dur / wall).toFixed (1) + 'x realtime)';
@@ -457,8 +497,17 @@ function syncVoiceDownloadButton () {
 	app.listenFor ('StopRequest', function () {
 		app.state.speaking = false; // engine abort follows; playback flush
 		stoppedByUser = true;
+		if (speechActive) {
+			var assembled = assembleParts ();
+			if (assembled) {
+				app.state.lastAudio = assembled.audio;
+				el ('status').textContent = 'Stopped — ' + (assembled.total / SR).toFixed (1) +
+					's of audio ready';
+				el ('actions').classList.remove ('disabled');
+				el ('wave-hint').classList.add ('gone');
+			}
+		}
 		speechActive = false;
-		parts = [];
 		// The worklet acks the flush with "ended" within a tick — but if the
 		// AudioContext is suspended (background tab, iOS), that ack never
 		// comes. Never leave the button stuck on Stop.
@@ -570,8 +619,29 @@ function syncVoiceDownloadButton () {
 	var loaded = false, ready = false, queued = null;
 
 	function frame () { return el ('am-frame'); }
+	function shouldUnloadEditor () {
+		var keep = !!w.PKTTS_KEEP_AUDIOMASS;
+		try { keep = keep || new URLSearchParams (w.location.search).get ('keepAudioMass') === '1'; } catch (e) {}
+		return !keep && app.isMobileBrowser && app.isMobileBrowser ();
+	}
 	function send (buf) {
 		frame ().contentWindow.postMessage ({ pkttsWav: buf, name: 'pocket-tts.wav' }, '*');
+	}
+	function stopEditorPlayback () {
+		try {
+			var pk = frame ().contentWindow.PKAudioEditor;
+			if (pk && pk.fireEvent) {
+				pk.fireEvent ('RequestStop');
+				pk.fireEvent ('RequestPause');
+			}
+		} catch (e) { /* editor not booted yet */ }
+	}
+	function unloadEditorIfMobile () {
+		if (!shouldUnloadEditor ()) return;
+		loaded = false;
+		ready = false;
+		queued = null;
+		try { frame ().src = 'about:blank'; } catch (e) {}
 	}
 
 	w.addEventListener ('message', function (ev) {
@@ -592,6 +662,9 @@ function syncVoiceDownloadButton () {
 
 	function openWith (buf, forClone) {
 		el ('am-use').style.display = forClone ? '' : 'none';
+		el ('am-copy-mobile').textContent = forClone ?
+			'Edit the waveform, then hit "Use this audio".' :
+			'Edit the waveform, then export from AudioMass.';
 		el ('am-modal').classList.add ('show');
 		if (!loaded) {
 			loaded = true;
@@ -617,8 +690,8 @@ function syncVoiceDownloadButton () {
 				app.fireEvent ('CloneSourceEdited', audio24k);
 			});
 			el ('am-modal').classList.remove ('show');
-			var pk = frame ().contentWindow.PKAudioEditor;
-			if (pk && pk.fireEvent) pk.fireEvent ('RequestPause');
+			stopEditorPlayback ();
+			unloadEditorIfMobile ();
 		} catch (e) {
 			toast ('Could not read the edited audio back — use File > Export instead.', 5000);
 		}
@@ -628,10 +701,8 @@ function syncVoiceDownloadButton () {
 		el ('am-modal').classList.remove ('show');
 		// Pause any playback inside AudioMass (same-origin iframe, so we can
 		// speak its event bus directly); the session itself stays alive.
-		try {
-			var pk = frame ().contentWindow.PKAudioEditor;
-			if (pk && pk.fireEvent) pk.fireEvent ('RequestPause');
-		} catch (e) { /* editor not booted yet */ }
+		stopEditorPlayback ();
+		unloadEditorIfMobile ();
 	}
 	el ('am-close').onclick = closeEditor;
 	d.addEventListener ('keydown', function (e) {
@@ -643,15 +714,22 @@ function syncVoiceDownloadButton () {
 })();
 
 // ── Clone modal ─────────────────────────────────────────────────────────────
-	(function () {
-		var pending = null; // validated 24k audio awaiting confirm
-		var recTimer = null;
-		var cloneBusy = false;
-		var activeCloneKey = null;
-		var cloneReadyListener = null;
+		(function () {
+			var pending = null; // validated 24k audio awaiting confirm
+			var recTimer = null;
+			var cloneBusy = false;
+			var activeCloneKey = null;
+			var cloneReadyListener = null;
+			var activeTab = 'file';
 
 		function isOpen () { return el ('clone-modal').classList.contains ('show'); }
-		function open () { el ('clone-modal').classList.add ('show'); tab ('file'); reset (); }
+		function open () {
+			d.documentElement.classList.add ('clone-modal-open');
+			d.body.classList.add ('clone-modal-open');
+			el ('clone-modal').classList.add ('show');
+			tab ('file');
+			reset ();
+		}
 		function close () {
 			if (!isOpen ()) return;
 			if (cloneBusy) {
@@ -659,6 +737,8 @@ function syncVoiceDownloadButton () {
 				return;
 			}
 			el ('clone-modal').classList.remove ('show');
+			d.documentElement.classList.remove ('clone-modal-open');
+			d.body.classList.remove ('clone-modal-open');
 			app.fireEvent ('RecordStop');
 			reset ();
 		}
@@ -675,23 +755,34 @@ function syncVoiceDownloadButton () {
 			function reset () {
 				pending = null;
 				clipAudio = null;
+				clipSource = '';
 				el ('clip-preview').style.display = 'none';
 				clearReport ();
 				el ('clone-confirm').disabled = true;
-			el ('rec-time').textContent = '0.0s';
-			el ('rec-bar').style.width = '0%';
-		el ('record').textContent = 'Start recording';
-		el ('record').classList.remove ('recording');
-		el ('record').disabled = false;
-		el ('tab-file').disabled = false;
-	}
-	function tab (which) {
-		el ('tab-file').classList.toggle ('active', which === 'file');
-		el ('tab-mic').classList.toggle ('active', which === 'mic');
-		el ('pane-file').style.display = which === 'file' ? '' : 'none';
-		el ('pane-mic').style.display = which === 'mic' ? '' : 'none';
-			el ('clip-preview').style.display = (which === 'file' && clipAudio) ? '' : 'none';
-		}
+				el ('rec-time').textContent = '0.0s';
+				el ('rec-bar').style.width = '0%';
+				el ('record').textContent = 'Start recording';
+				el ('record').classList.remove ('recording');
+				el ('record').disabled = false;
+				el ('record').title = '';
+				el ('tab-file').disabled = false;
+			}
+			function tab (which) {
+				activeTab = which;
+				el ('tab-file').classList.toggle ('active', which === 'file');
+				el ('tab-mic').classList.toggle ('active', which === 'mic');
+				el ('pane-file').style.display = which === 'file' ? '' : 'none';
+				el ('pane-mic').style.display = which === 'mic' ? '' : 'none';
+				if (clipAudio && clipSource === which) {
+					el ('clip-preview').style.display = '';
+					applySelection ();
+				}
+				else {
+					el ('clip-preview').style.display = 'none';
+					pending = null;
+					el ('clone-confirm').disabled = true;
+				}
+			}
 
 		function clearReport () {
 			el ('clone-report').textContent = '';
@@ -745,12 +836,87 @@ function syncVoiceDownloadButton () {
 	}
 
 	// ── clip preview: waveform + draggable trim region ──────────────────
-	var clipAudio = null, clipLabel = '', selA = 0, selB = 1;
+	var clipAudio = null, clipLabel = '', clipSource = '', selA = 0, selB = 1;
 	var SR24 = 24000, MIN_SEL_S = 2;
 
 	function fmtT (sec) {
 		var m = Math.floor (sec / 60), r = sec - m * 60;
 		return m + ':' + (r < 10 ? '0' : '') + r.toFixed (1);
+	}
+	function percentile (xs, p) {
+		if (!xs.length) return 0;
+		var sorted = xs.slice ().sort (function (a, b) { return a - b; });
+		return sorted[Math.max (0, Math.min (sorted.length - 1, Math.floor ((sorted.length - 1) * p)))];
+	}
+	function sustainedBoundary (active, fromStart) {
+		var need = 3, span = 4, i, j, hits;
+		if (fromStart) {
+			for (i = 0; i < active.length; ++i) {
+				hits = 0;
+				for (j = i; j < Math.min (active.length, i + span); ++j) if (active[j]) hits++;
+				if (hits >= need) return i;
+			}
+		}
+		else {
+			for (i = active.length - 1; i >= 0; --i) {
+				hits = 0;
+				for (j = i; j >= Math.max (0, i - span + 1); --j) if (active[j]) hits++;
+				if (hits >= need) return i;
+			}
+		}
+		return -1;
+	}
+	function suggestSpeechSelection (audio) {
+		var n = audio ? audio.length : 0, dur = n / SR24;
+		if (dur < 2.5) return { a: 0, b: 1 };
+
+		var win = Math.floor (SR24 * 0.05), frames = Math.floor (n / win);
+		if (frames < 4) return { a: 0, b: 1 };
+
+		var series = [], totalSq = 0, i, j, s, x;
+		for (i = 0; i < frames; ++i) {
+			s = 0;
+			for (j = i * win; j < (i + 1) * win; ++j) {
+				x = audio[j];
+				s += x * x;
+			}
+			totalSq += s;
+			series.push (Math.sqrt (s / win));
+		}
+
+		var globalRms = Math.sqrt (totalSq / Math.max (1, frames * win));
+		if (globalRms < 0.006) return { a: 0, b: 1 };
+
+		var noise = percentile (series, 0.2);
+		var threshold = Math.max (0.0025, globalRms * 0.16);
+		if (noise < globalRms * 0.55) threshold = Math.max (threshold, noise * 3.2);
+
+		var active = series.map (function (v) { return v >= threshold; });
+		var start = sustainedBoundary (active, true);
+		var end = sustainedBoundary (active, false);
+		if (start < 0 || end < start || (end - start + 1) * 0.05 < 1.0) return { a: 0, b: 1 };
+
+		var pad = 4; // keep about 200ms around the detected voice.
+		start = Math.max (0, start - pad);
+		end = Math.min (frames - 1, end + pad);
+		var a = (start * win) / n;
+		var b = Math.min (1, ((end + 1) * win) / n);
+
+		var minDur = Math.min (6, dur);
+		if ((b - a) * dur < minDur) {
+			var half = (minDur / dur) / 2;
+			var mid = (a + b) / 2;
+			a = mid - half;
+			b = mid + half;
+			if (a < 0) { b -= a; a = 0; }
+			if (b > 1) { a -= b - 1; b = 1; }
+			a = Math.max (0, a);
+		}
+
+		// Ignore tiny trims; they only make the UI look twitchy.
+		if (a < 0.02 && b > 0.98) return { a: 0, b: 1 };
+		if ((a * dur) + ((1 - b) * dur) < 0.3) return { a: 0, b: 1 };
+		return { a: a, b: b };
 	}
 	function drawClip () {
 		var c = el ('clip-wave'), ctx = c.getContext ('2d');
@@ -796,15 +962,21 @@ function syncVoiceDownloadButton () {
 		pending = r.ok ? slice : null;
 		report (r, clipLabel + (selB - selA < 0.999 ? ' (trimmed)' : ''));
 	}
-	function showClip (audio, label) {
-		clipAudio = audio;
-		clipLabel = label;
-		selA = 0; selB = 1;
-		el ('clip-preview').style.display = '';
-		drawClip ();
-		layoutSel ();
-		applySelection ();
-	}
+		function showClip (audio, label, source) {
+			clipAudio = audio;
+			clipLabel = label;
+			clipSource = source || clipSource || activeTab;
+			var suggested = suggestSpeechSelection (audio);
+			selA = suggested.a; selB = suggested.b;
+			el ('clip-preview').style.display = clipSource === activeTab ? '' : 'none';
+			drawClip ();
+			layoutSel ();
+			if (clipSource === activeTab) applySelection ();
+			else {
+				pending = null;
+				el ('clone-confirm').disabled = true;
+			}
+		}
 	// handle dragging (pointer events cover touch)
 	['l', 'r'].forEach (function (side) {
 			var h = el ('clip-handle-' + side);
@@ -854,7 +1026,7 @@ function syncVoiceDownloadButton () {
 			app.decodeFile (file).then (function (buf) {
 				return app.resampleTo24k (buf);
 			}).then (function (audio) {
-				showClip (audio, file.name);
+				showClip (audio, file.name, 'file');
 			}).catch (function (e) {
 				setReportMessage ('err', 'Could not decode this file (' + e + ')');
 			});
@@ -916,10 +1088,11 @@ function syncVoiceDownloadButton () {
 			app.fireEvent ('RecordStart');
 		}
 	};
-	app.listenFor ('RecordStarted', function () {
-		el ('record').textContent = 'Stop';
-		el ('record').classList.add ('recording');
-		el ('record').disabled = true; // no accidental instant stop
+		app.listenFor ('RecordStarted', function () {
+			el ('record').textContent = 'Stop';
+			el ('record').classList.add ('recording');
+			el ('record').title = '';
+			el ('record').disabled = true; // no accidental instant stop
 		setTimeout (function () { el ('record').disabled = false; }, 800);
 			el ('clone-confirm').disabled = true;
 			el ('tab-file').disabled = true;
@@ -933,18 +1106,29 @@ function syncVoiceDownloadButton () {
 		drawLive (p.latest);
 		if (p.seconds >= 25) app.fireEvent ('RecordStop');
 	});
-	app.listenFor ('RecordDone', function (r) {
-		el ('record').textContent = 'Start recording';
-		el ('record').classList.remove ('recording');
-		el ('tab-file').disabled = false;
-		if (!isOpen ()) return;
-			app.resampleRaw (r.audio, r.sampleRate).then (function (audio) {
-				if (!isOpen () || cloneBusy) return;
-				var leveled = app.levelMobileMicForClone ? app.levelMobileMicForClone (audio) : { audio: audio, gain: 1 };
-				var label = leveled.gain > 1 ? 'Microphone recording — mobile level normalized' : 'Microphone recording';
-				showClip (leveled.audio, label);
+		app.listenFor ('RecordDone', function (r) {
+			el ('record').textContent = 'Start recording';
+				el ('record').classList.remove ('recording');
+				el ('tab-file').disabled = false;
+				if (!isOpen ()) return;
+				app.resampleRaw (r.audio, r.sampleRate).then (function (audio) {
+					if (!isOpen () || cloneBusy) return;
+					if (audio.length < 6 * SR24) {
+						clipAudio = null;
+						clipSource = '';
+						pending = null;
+						el ('clip-preview').style.display = 'none';
+						el ('clone-confirm').disabled = true;
+						el ('record').title = 'Need at least 6 seconds of audio to clone a voice.';
+						setReportMessage ('err', 'Need more audio — record at least 6 seconds.');
+						return;
+					}
+					el ('record').title = '';
+					var leveled = app.levelMobileMicForClone ? app.levelMobileMicForClone (audio) : { audio: audio, gain: 1 };
+					var label = leveled.gain > 1 ? 'Microphone recording — mobile level normalized' : 'Microphone recording';
+					showClip (leveled.audio, label, 'mic');
+				});
 			});
-		});
 		app.listenFor ('RecordError', function (msg) {
 			if (!isOpen ()) return;
 			setReportMessage ('err', 'Microphone unavailable: ' + msg);
