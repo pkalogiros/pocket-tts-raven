@@ -391,9 +391,7 @@ if (w.PKTTS_UNSUPPORTED) {
 	(function () {
 		var slider = el ('temp'), out = el ('temp-val');
 		var saved = parseFloat (localStorage.getItem ('pktts_temp'));
-		// Mobile default runs warmer: short phrases read better with more
-		// expressiveness; desktop (long-form poem) stays steadier at 0.5.
-		var defTemp = w.matchMedia ('(max-width: 720px)').matches ? 0.6 : 0.5;
+		var defTemp = 0.45;
 		app.state.temperature = (saved >= 0.1 && saved <= 0.9) ? saved : defTemp;
 		slider.value = app.state.temperature;
 		out.textContent = app.state.temperature.toFixed (2);

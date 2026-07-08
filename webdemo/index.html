@@ -25,7 +25,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" crossorigin="anonymous">
-<script>try{if(localStorage.getItem('pktts_theme')==='clean')document.documentElement.setAttribute('data-theme','clean')}catch(e){}</script>
+<script>try{var q=new URLSearchParams(location.search);if(q.get('b')==='1'||localStorage.getItem('pktts_theme')==='clean')document.documentElement.setAttribute('data-theme','clean')}catch(e){}</script>
 <script>
 (function () {
 	var missing = [];
@@ -166,6 +166,7 @@
 	.chip .tag { font: 8px/1 var(--px); text-transform: uppercase; color: var(--ash); }
 	.chip .x { font-size: 17px; line-height: 1; opacity: .55; padding: 0 1px; }
 	.chip .x:hover { opacity: 1; color: var(--blood-lite); }
+	.text-help { color: var(--ash); font: 16px/1.2 var(--vt); margin-bottom: -7px; }
 
 	textarea { width: 100%; min-height: 320px; resize: vertical;
 		border: 2px solid; border-color: var(--dark) var(--lite) var(--lite) var(--dark);
@@ -535,6 +536,7 @@
 		color: #fff; text-shadow: none; }
 	html[data-theme="clean"] .chip.add { border-style: dashed; color: #6B7480; background: transparent; }
 	html[data-theme="clean"] .chip .tag { font: 600 9px/1 inherit; color: inherit; opacity: .6; }
+	html[data-theme="clean"] .text-help { color: #6B7480; font: 13px/1.4 inherit; }
 	html[data-theme="clean"] textarea { border: 1px solid #E4E7EA; border-radius: 10px;
 		background: #fff; color: #1C2024; font: 15px/1.55 inherit; text-shadow: none;
 		caret-color: auto; }
@@ -807,6 +809,7 @@ html[data-theme="clean"] .shrine-row { border-top: 0; }
 		<div class="win-bar"><span class="sk">☠</span> VOICE_CRYPT.EXE<span id="win-engine"></span><span class="grow"></span><span class="win-dots"><i>_</i><i>□</i><i>×</i></span></div>
 		<div class="card">
 		<div id="voices"></div>
+			<div class="text-help">Click the text box and type your own text.</div>
 			<textarea id="text" spellcheck="false">Taken from, the Raven.
 
 “Be that word our sign of parting. bird or fiend” I shrieked upstarting-
@@ -830,8 +833,8 @@ Nevermore...</textarea>
 		<div class="control-row">
 			<div class="params">
 				<label for="temp">Temperature</label>
-				<input id="temp" type="range" min="0.1" max="0.9" step="0.05" value="0.5">
-				<span id="temp-val">0.50</span>
+				<input id="temp" type="range" min="0.1" max="0.9" step="0.05" value="0.45">
+				<span id="temp-val">0.45</span>
 				<span class="hint grow">higher = more expressive, less predictable</span>
 			</div>
 			<button id="speak" class="primary" disabled title="Loading engine…">Speak</button>
