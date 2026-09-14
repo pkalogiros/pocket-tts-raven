@@ -715,6 +715,7 @@ html[data-theme="clean"] .shrine-row { border-top: 0; }
 		.rec-row button.primary { width: 100%; }
 		.shrine-row { flex-direction: column; align-items: flex-start; }
 	}
+.voice-options{margin:12px 0;padding:12px 14px;border:1px solid var(--line,#bbb);border-radius:8px}.voice-options summary{cursor:pointer}.option-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:16px}.option-grid label{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px}.option-grid select,.option-grid input[type=number]{max-width:180px;padding:6px;border:1px solid #aaa;border-radius:4px}.option-grid input[type=file]{max-width:230px}.option-grid small{opacity:.6}.voice-options p{margin-bottom:0}
 </style>
 </head>
 <body>
@@ -839,6 +840,19 @@ Nevermore...</textarea>
 			</div>
 			<button id="speak" class="primary" disabled title="Loading engine…">Speak</button>
 		</div>
+		<details id="voice-options" class="voice-options">
+			<summary>Emotion &amp; vector controls</summary>
+			<div class="option-grid">
+				<label><input id="steering-enabled" type="checkbox"> Emotion steering <small>reloads engine</small></label>
+				<label><input id="prepare-caches" type="checkbox"> Prepare voice caches separately <small>reloads engine</small></label>
+				<label>Emotion <select id="emotion"><option value="neutral">Neutral</option><option value="angry">Preset 1</option><option value="disgust">Preset 2</option><option value="fear">Preset 3</option><option value="happy">Preset 4</option><option value="sad">Preset 5</option></select></label>
+				<label>Intensity <input id="emotion-strength" type="range" min="0" max="1.2" step="0.05" value="0.8" aria-label="Emotion strength"><input id="emotion-intensity" type="number" min="0" max="1.2" step="0.05" value="0.8"></label>
+				<label>Seed <input id="sampling-seed" type="number" min="0" max="9007199254740991" step="1" placeholder="Random"></label>
+				<label>Vector set <select id="vector-set"><option value="default">Default</option></select></label>
+				<label>Custom vectors <input id="vector-file" type="file" accept=".npy"></label>
+			</div>
+			<p id="vector-status" class="hint">Choose an emotion and adjust intensity to hear its effect. Neutral or zero intensity applies no shift. Custom vectors: [6,1024] float32 .npy, loaded locally for this session.</p>
+		</details>
 		<div class="row output-row">
 			<span id="status" class="grow">Loading engine…</span>
 			<span id="actions" class="disabled">

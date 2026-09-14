@@ -45,7 +45,12 @@ void* ptt_create(const char* models_dir, const char* voices_dir,
 /* ptt_create with a flags word for special engine modes:
  *   bit 0: decoder_only  — loads just the Mimi decoder (see ptt_decode)
  *   bit 1: defer_encoder — skip the voice encoder until ptt_load_encoder
- *   bit 2: encoder_only  — loads just the voice encoder (ptt_encode_voice) */
+ *   bit 2: encoder_only  — loads just the voice encoder (ptt_encode_voice)
+ *   bit 3: soura — opt-in steering graphs and models/soura_vectors.npy
+ *   bit 4: conditioning_only — AR/text only, prepare caches from existing .emb;
+ *          implies defer_encoder. No audio generation/decoding on this handle.
+ * decoder_only, encoder_only and conditioning_only are mutually exclusive.
+ * soura is compatible with normal/deferred and conditioning-only handles. */
 void* ptt_create_ex(const char* models_dir, const char* voices_dir,
                     const char* tokenizer_path, const char* precision,
                     float temperature, int lsd_steps, int num_threads,
@@ -73,6 +78,21 @@ void ptt_set_soften_commas(void* handle, int soften);
 
 /* Max latent frames per decoder batch (default 15; 80ms audio each).   */
 void ptt_set_max_chunk(void* handle, int frames);
+
+/* Optional controls: 0 success, -1 invalid input/disabled feature.
+ * Call only when no stream is active. Neutral or zero intensity bypasses steering.
+ * intensity: finite [0,1.2]. Labels: neutral, angry, disgust, fear, happy, sad.
+ * Seed: integer [0,2^53-1], passed as double for JS Number compatibility.
+ * RNG is module-global: do not interleave independently seeded handles.
+ * Vector replacement validates before changing the current set, then resets neutral.
+ * C callers must reset emotion for each new request; omitted controls are not implicit. */
+int ptt_set_emotion(void* handle, const char* emotion, double intensity);
+int ptt_set_seed(void* handle, double seed);
+int ptt_load_soura_vectors(void* handle, const char* path);
+/* Build/validate .emb and .kv without generating audio. A conditioning-only
+ * handle requires a pre-encoded .emb in voices/.cache. In WASM, run in a
+ * disposable worker so conditioning memory is reclaimed on worker termination. */
+int ptt_prepare_voice(void* handle, const char* voice);
 
 /* Must be called BEFORE the first ptt_create* on WASM builds: size of the
  * shared ORT thread pool and whether idle workers spin-wait (spin=1).   */

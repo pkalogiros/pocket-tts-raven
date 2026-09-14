@@ -197,6 +197,19 @@ ptt_destroy(tts);
 | split pipelines | `ptt_latents_start/poll/stop/end` (raw latent frames out), `ptt_decode`, `ptt_decoder_reset` |
 | diagnostics | `ptt_set_profiling`, `ptt_print_profile`, `ptt_debug_bench` |
 
+## Optional native emotion steering and cache preparation
+
+The native runtime supports opt-in `--soura` emotion steering, per-request
+emotion/intensity/seed controls, custom or reference-derived vectors, and
+`--prepare-voice` for building voice caches in a disposable process. New native synthesis
+behavior remains opt-in. The web UI defaults to Varkos with steering enabled
+(use its checkbox or `?soura=0` to disable it). The rebuilt WASM engines also
+expose steering, custom vectors, seeds, and optional disposable cache preparation;
+see [browser controls](webdemo/OPTIONAL_FEATURES.md).
+
+See [optional features](docs/OPTIONAL_FEATURES.md) for model preparation, flags,
+examples, limitations, and regression checks.
+
 ## Caching
 
 PocketTTS uses two layers of disk caching, both stored under `voices/.cache/`:

@@ -101,6 +101,11 @@ function wavF32 (samples) {
 	// still wins (testing); only persisted pins are ignored.
 	if (engine !== 'native' && !qp && w.matchMedia ('(max-width: 720px)').matches) engine = 'native';
 	app.state.engine = engine;
+	app.state.steering = engine !== 'split' && q.get ('soura') !== '0';
+	app.state.prepareCaches = q.get ('prepareCaches') === '1';
+	app.state.emotion = 'neutral';
+	app.state.intensity = 0.8;
+	var customVectors = null, pendingVectors = null;
 	var mobileCloneRestart = engine === 'native' && isMobileBrowser () &&
 		q.get ('mobileCloneRestart') !== '0' && !w.PKTTS_DISABLE_MOBILE_CLONE_RESTART;
 	var worker = null;
@@ -130,7 +135,14 @@ function wavF32 (samples) {
 		var d = e.data;
 		switch (d.type) {
 			case 'progress':    app.fireEvent ('EngineProgress', d); break;
+			case 'vectorsLoaded': if (pendingVectors) { customVectors = pendingVectors; pendingVectors = null; } app.fireEvent ('VectorsLoaded'); break;
+			case 'voiceCaches':
+				var savedVoice = app.state.voicePayloads[d.key];
+				if (savedVoice) app.fireEvent ('VoicePersist', Object.assign ({}, savedVoice, d));
+				break;
 			case 'ready':
+				app.state.engineCacheVersion = d.cacheVersion;
+				if (customVectors && d.soura) worker.postMessage ({ type: 'loadVectors', buffer: customVectors.slice (0) });
 				console.log ('[pktts] engine=' + engine + ' variant=' + (d.variant || '-') +
 					' pool=' + (d.pool || '-'));
 				app.state.engineInfo = d.variant
@@ -139,6 +151,8 @@ function wavF32 (samples) {
 					: engine;
 				app.fireEvent ('EngineProgress', { label: 'Preparing voices', pct: 0.98 });
 				worker.postMessage ({ type: 'loadPresets', presets: [
+					{ key: 'varkos', label: 'VARKOS',
+					  url: assetUrl ('presets/varkos.emb') },
 					{ key: 'alba', label: 'ALBA',
 					  url: assetUrl ('presets/alba.emb') }
 				]});
@@ -170,6 +184,7 @@ function wavF32 (samples) {
 				app.fireEvent ('EngineBench', d);
 				break;
 			case 'error':
+				if (d.during === 'loadVectors') pendingVectors = null;
 				if (cloneInFlightKey && d.during === 'clone') {
 					d.key = cloneInFlightKey;
 					cloneInFlightKey = null;
@@ -192,7 +207,10 @@ function wavF32 (samples) {
 			decPool: parseInt (q.get ('decpool'), 10) || 0,
 			spin: spinParam === '0' ? 0 : spinParam === '1' ? 1 : spinDefault,
 			variant: q.get ('variant') || '',
-			bench: q.get ('bench') === '1' });
+			bench: q.get ('bench') === '1',
+			soura: app.state.steering, prepareCaches: app.state.prepareCaches,
+			keepCommas: q.get ('keepCommas') !== '0',
+			vectorsUrl: assetUrl ('models/soura_vectors.derived.npy') });
 		return next;
 	}
 
@@ -233,6 +251,7 @@ function wavF32 (samples) {
 		if (!worker || !payload || !payload.emb) return;
 		var emb = copyBuffer (payload.emb);
 		var embCache = copyBuffer (payload.embCache);
+		var kvCache = copyBuffer (payload.kvCache);
 		var msg = { type: 'restoreVoice', key: payload.key, label: payload.label,
 			embDims: payload.embDims, emb: emb, capSeconds: voiceCloneCapSeconds () };
 		var transfer = [ emb ];
@@ -240,6 +259,7 @@ function wavF32 (samples) {
 			msg.embCache = embCache;
 			transfer.push (embCache);
 		}
+		if (kvCache) { msg.kvCache = kvCache; msg.cacheVersion = payload.cacheVersion; transfer.push (kvCache); }
 		worker.postMessage (msg, transfer);
 	}
 
@@ -268,6 +288,17 @@ function wavF32 (samples) {
 		});
 	}
 
+	function prepareVoiceInPageWorker (key, emb) {
+		return new Promise (function (resolve, reject) {
+			var prep = moduleWorker (codeUrl ('src/prepare-worker.js'));
+			prep.onmessage = function (e) { prep.terminate (); if (e.data.ok) resolve (e.data.kv); else reject (new Error (e.data.message)); };
+			prep.onerror = function (e) { prep.terminate (); reject (new Error (e.message || 'Cache preparation failed')); };
+			var copy = emb.slice (0);
+			prep.postMessage ({ assetBase: ASSET_BASE, modelsUrl: assetUrl ('models').replace (/\/$/, ''),
+				key: key, emb: copy, pool: 2, soura: app.state.steering }, [copy]);
+		});
+	}
+
 	function cloneWithMobileRestart (req) {
 		cloneInFlightKey = req.key;
 		app.fireEvent ('StopRequest');
@@ -279,10 +310,15 @@ function wavF32 (samples) {
 		sleep (250).then (function () {
 			app.fireEvent ('EngineProgress', { label: 'Encoding voice', pct: 0.32 });
 			return encodeVoiceInPageWorker (req.key, wavBytes);
-		}).then (function (emb) {
+		}).then (async function (emb) {
+			var kv = null;
+			if (app.state.prepareCaches) {
+				app.fireEvent ('EngineProgress', { label: 'Preparing voice cache', pct: 0.62 });
+				kv = await prepareVoiceInPageWorker (req.key, emb);
+			}
 			app.fireEvent ('EngineProgress', { label: 'Restarting engine', pct: 0.72 });
 			var payload = { key: req.key, label: req.label, embDims: null,
-				emb: wavForStore, embCache: emb.slice (0) };
+				emb: wavForStore, embCache: emb.slice (0), kvCache: kv, cacheVersion: app.state.engineCacheVersion };
 			app.fireEvent ('VoicePersist', payload);
 			startEngine ();
 			return waitForEngineReady ().then (function () {
@@ -319,6 +355,11 @@ function wavF32 (samples) {
 		if (event.persisted && shuttingDown) w.location.reload ();
 	}, { capture: true });
 
+	app.listenFor ('VectorsRequest', function (buffer) {
+		if (!worker || !app.state.steering) return;
+		pendingVectors = buffer.slice (0);
+		worker.postMessage ({ type: 'loadVectors', buffer: buffer }, [buffer]);
+	});
 	app.listenFor ('StopRequest', function () {
 		if (shuttingDown || !worker) return;
 		worker.postMessage ({ type: 'stop' });
@@ -333,7 +374,8 @@ function wavF32 (samples) {
 		if (shuttingDown || !worker) return;
 		worker.postMessage ({ type: 'speak', text: req.text, voiceKey: req.voiceKey,
 			temperature: (req.temperature === 0 || req.temperature > 0) ? req.temperature : 0.45,
-			seed: (Math.random () * 0xffffffff) >>> 0 });
+			seed: req.seed === undefined ? (Math.random () * 0xffffffff) >>> 0 : req.seed,
+			emotion: req.emotion, intensity: req.intensity });
 	});
 	app.listenFor ('CloneRequest', function (req) {
 		if (shuttingDown) return;
@@ -385,18 +427,20 @@ function wavF32 (samples) {
 			});
 		}
 
+	var voiceWrites = Promise.resolve ();
 	app.listenFor ('VoicePersist', function (v) {
 		var copy = copyBuffer (v.emb);
 		var embCache = copyBuffer (v.embCache);
+		var kvCache = copyBuffer (v.kvCache);
 		if (copy) {
 			app.state.voicePayloads[v.key] = {
 				key: v.key, label: v.label, embDims: v.embDims || null,
-				emb: copy, embCache: embCache
+				emb: copy, embCache: embCache, kvCache: kvCache, cacheVersion: v.cacheVersion
 			};
 		}
-		dirp ().then (async function (dir) {
+		voiceWrites = voiceWrites.then (function () { return dirp (); }).then (async function (dir) {
 			var meta = JSON.stringify ({ key: v.key, label: v.label,
-				embDims: v.embDims, hasEmbCache: !!embCache });
+				embDims: v.embDims, hasEmbCache: !!embCache, hasKvCache: !!kvCache, cacheVersion: v.cacheVersion });
 			var fh = await dir.getFileHandle (v.key + '.json', { create: true });
 			var ws = await fh.createWritable ();
 			await ws.write (meta); await ws.close ();
@@ -408,6 +452,10 @@ function wavF32 (samples) {
 				ws = await fh.createWritable ();
 				await ws.write (embCache); await ws.close ();
 			}
+			if (kvCache) {
+				fh = await dir.getFileHandle (v.key + '.kv', { create: true });
+				ws = await fh.createWritable (); await ws.write (kvCache); await ws.close ();
+			}
 		}).catch (function () { /* OPFS unavailable: session-only voices */ });
 	});
 
@@ -417,7 +465,8 @@ function wavF32 (samples) {
 			return Promise.allSettled ([
 				dir.removeEntry (key + '.json'),
 				dir.removeEntry (key + '.bin'),
-				dir.removeEntry (key + '.emb')
+				dir.removeEntry (key + '.emb'),
+				dir.removeEntry (key + '.kv')
 			]);
 		}).catch (function () {});
 	});
@@ -429,7 +478,10 @@ function wavF32 (samples) {
 				try {
 					var meta = JSON.parse (await (await fh.getFile ()).text ());
 					var bin = await (await (await dir.getFileHandle (meta.key + '.bin')).getFile ()).arrayBuffer ();
-					var embCache = null;
+					var embCache = null, kvCache = null;
+					if (meta.hasKvCache) {
+						try { kvCache = await (await (await dir.getFileHandle (meta.key + '.kv')).getFile ()).arrayBuffer (); } catch (e) {}
+					}
 					if (meta.hasEmbCache) {
 						try {
 							embCache = await (await (await dir.getFileHandle (meta.key + '.emb')).getFile ()).arrayBuffer ();
@@ -437,11 +489,12 @@ function wavF32 (samples) {
 					}
 					app.state.voicePayloads[meta.key] = {
 						key: meta.key, label: meta.label, embDims: meta.embDims || null,
-						emb: bin.slice (0), embCache: embCache ? embCache.slice (0) : null
+						emb: bin.slice (0), embCache: embCache ? embCache.slice (0) : null,
+						kvCache: kvCache, cacheVersion: meta.cacheVersion
 					};
 					app.fireEvent ('VoiceRestore', { key: meta.key, label: meta.label,
 						embDims: meta.embDims, emb: bin,
-						embCache: embCache });
+						embCache: embCache, kvCache: kvCache, cacheVersion: meta.cacheVersion });
 				} catch (e) { /* skip broken entries */ }
 			}
 		}).catch (function () {});

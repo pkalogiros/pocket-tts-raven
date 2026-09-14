@@ -51,11 +51,12 @@ async function fetchWithProgress(url, label, base, weight) {
 }
 
 const handlers = {
-  async init({ modelsUrl, threads }) {
+  async init({ modelsUrl, threads, soura = false, vectorsUrl, prepareCaches = false, keepCommas = true }) {
+    if (prepareCaches) throw new Error("Disposable cache preparation requires the native WASM engine");
     // Pre-fetch the big models with download progress, hand bytes to ORT.
     const buffers = {};
     const parts = [
-      ["flow_lm_main_delta_flow_int8.onnx", 0.62],
+      [soura ? "flow_lm_main_delta_flow_int8_soura.onnx" : "flow_lm_main_delta_flow_int8.onnx", 0.62],
       ["mimi_decoder_delta_int8.onnx", 0.18],
       ["text_conditioner.onnx", 0.12],
     ];
@@ -65,8 +66,8 @@ const handlers = {
       base += weight;
     }
     post("progress", { label: "Compiling sessions", pct: 0.95 });
-    tts = await PocketTTS.create({ ort, modelsUrl, threads, buffers });
-    post("ready", { sr: SR });
+    tts = await PocketTTS.create({ ort, modelsUrl, threads, buffers, soura, vectorsUrl, keepCommas });
+    post("ready", { sr: SR, soura, samplingSeed: true, prepareCaches: false });
   },
 
   async loadPresets({ presets }) {
@@ -116,6 +117,10 @@ const handlers = {
     post("voice", { key, label, builtin: false });
   },
 
+  async loadVectors({ buffer }) {
+    await serialize(() => { tts.loadVectors(buffer); post("vectorsLoaded", {}); });
+  },
+
   async stop() {
     if (tts) tts.cancel();
   },
@@ -137,7 +142,7 @@ const handlers = {
     });
   },
 
-  async speakInner({ text, voiceKey, temperature, seed }) {
+  async speakInner({ text, voiceKey, temperature, seed, emotion, intensity }) {
     post("speakStarted", {});
     const squeeze = new SilenceSqueeze();
     let total = 0;
@@ -148,7 +153,7 @@ const handlers = {
       post("chunk", { samples: copy.buffer }, [copy.buffer]);
     };
     await tts.speak(text, voiceKey, (chunk) => emit(squeeze.push(chunk)),
-                    { temperature, seed });
+                    { temperature, seed, emotion, intensity });
     emit(squeeze.flush());
     post("speakDone", { totalSamples: total });
   },

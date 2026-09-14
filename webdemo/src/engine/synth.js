@@ -3,6 +3,7 @@
 // with KV snapshots, merged-flow AR loop, chunked streaming decode with
 // crossfades, and the leading-trim gate with the sustain/burst check.
 
+import { controls, parseVectors, applyShift } from "./steering.js";
 import { StateRunner } from "./states.js";
 import { Tokenizer } from "./tokenizer.js";
 import { splitSentences, prepareText, isTerminalBoundary } from "./text.js";
@@ -179,7 +180,7 @@ export class Emitter {
 
 export class PocketTTS {
   /** @param {{ort: any, modelsUrl: string, threads?: number, buffers?: Record<string, Uint8Array>, loader?: {json:(u:string)=>Promise<any>, buffer:(u:string)=>Promise<ArrayBuffer>}}} opts */
-  static async create({ ort, modelsUrl, threads = 4, buffers, loader }) {
+  static async create({ ort, modelsUrl, threads = 4, buffers, loader, soura = false, vectorsUrl, keepCommas = true }) {
     ort.env.wasm.numThreads = threads;
     const load = loader ?? {
       json: async (u) => (await fetch(u)).json(),
@@ -187,15 +188,19 @@ export class PocketTTS {
     };
     const self = new PocketTTS();
     self.ort = ort;
+    self.soura = soura === true; self.keepCommas = keepCommas;
+    self.shift = new Float32Array(1024);
+    self.shiftTensor = new ort.Tensor("float32", self.shift, [1, 1, 1024]);
     const so = { executionProviders: ["wasm"], graphOptimizationLevel: "all" };
     const src = (name) => (buffers && buffers[name]) || `${modelsUrl}/${name}`;
     const [main, dec, txt, vocab, bosBuf] = await Promise.all([
-      ort.InferenceSession.create(src("flow_lm_main_delta_flow_int8.onnx"), so),
+      ort.InferenceSession.create(src(self.soura ? "flow_lm_main_delta_flow_int8_soura.onnx" : "flow_lm_main_delta_flow_int8.onnx"), so),
       ort.InferenceSession.create(src("mimi_decoder_delta_int8.onnx"), so),
       ort.InferenceSession.create(src("text_conditioner.onnx"), so),
       load.json(`${modelsUrl}/spm_vocab.json`),
       load.buffer(`${modelsUrl}/bos_before_voice.npy`),
     ]);
+    if (self.soura) self.vectors = parseVectors(await load.buffer(vectorsUrl || `${modelsUrl}/soura_vectors.npy`));
     self.main = new StateRunner(main, ort);
     self.dec = new StateRunner(dec, ort);
     self.txt = txt;
@@ -205,6 +210,12 @@ export class PocketTTS {
     self.modelsUrl = modelsUrl;
     self.voiceSnapshots = new Map();
     return self;
+  }
+
+  loadVectors(buffer) {
+    if (!this.soura) throw new Error("Enable steering before loading vectors");
+    this.vectors = parseVectors(buffer);
+    this.shift.fill(0);
   }
 
   async loadEncoder() {
@@ -249,6 +260,7 @@ export class PocketTTS {
 
   async condPass(data, dims) {
     await this.main.run({
+      ...(this.soura ? { soura_shift: this.shiftTensor } : {}),
       sequence: this.emptySeq(),
       text_embeddings: new this.ort.Tensor("float32", data, dims),
       flow_x: this.zeroX(),
@@ -257,6 +269,7 @@ export class PocketTTS {
 
   /** Run voice conditioning once and cache the KV snapshot under `key`. */
   async prepareVoice(key, embedding) {
+    this.shift.fill(0);
     this.main.reset();
     await this.condPass(embedding.data, embedding.dims);
     this.voiceSnapshots.set(key, this.main.snapshot());
@@ -271,6 +284,8 @@ export class PocketTTS {
   cancel() { this._cancel = true; }
 
   async speak(text, voiceKey, onChunk, opts = {}) {
+    const selected = controls(this.soura, opts);
+    if (this.soura) applyShift(this.shift, this.vectors, selected.emotion, selected.intensity);
     this._cancel = false;
     const temperature = opts.temperature ?? 0.45;
     const maxFrames = opts.maxFrames ?? 500;
@@ -291,7 +306,7 @@ export class PocketTTS {
 
     for (let si = 0; si < sentences.length; si++) {
       // Keep commas: the model's own clause phrasing beats synthetic pauses.
-      const { text: prepared, eosExtra } = prepareText(sentences[si]);
+      const { text: prepared, eosExtra } = prepareText(this.keepCommas ? sentences[si] : sentences[si].replace(/[,;:]/g, " "));
       if (!prepared) continue;
       const lastChunk = si === sentences.length - 1;
       const terminal = lastChunk || isTerminalBoundary(sentences[si]);
@@ -318,6 +333,7 @@ export class PocketTTS {
         if (temperature > 0) randn(noise, stddev, rand);
         else noise.fill(0);
         const out = await this.main.run({
+          ...(this.soura ? { soura_shift: this.shiftTensor } : {}),
           sequence: new this.ort.Tensor("float32", cl.slice(), [1, 1, 32]),
           text_embeddings: this.emptyText(),
           flow_x: new this.ort.Tensor("float32", noise.slice(), [1, 32]),
