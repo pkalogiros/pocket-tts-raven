@@ -1,0 +1,31 @@
+{
+  "source": "Varkos reference-derived layer-5 vectors",
+  "labels": [
+    "neutral",
+    "angry",
+    "disgust",
+    "fear",
+    "happy",
+    "sad"
+  ],
+  "vectors_sha256": "8a958606883fecb0cd263b5138ab42f72d9cc14d385b6b3da66a52b5fb55ab42",
+  "base_sha256": {
+    "flow_lm_main_int8.onnx": "f9bd8106b79a0192c1c43399ab938fb24900a95c1c599870d75a884e99000116",
+    "flow_lm_main_delta_attn_flow_int8.onnx": "cded084b8bdf9c7225130c3586db6d046291d72395f437ef502de630563c7f97"
+  },
+  "injection_layer": 5,
+  "derived": {
+    "from": "reports/tts-lab-2026-09-06/derive-soura.py",
+    "method": "mean layer-5 activation of each Varkos reference minus the neutral reference, scaled to 0.3 of the activation norm",
+    "sources": {
+      "angry": "varkos-x-angry",
+      "disgust": "varkos-x-annoyed",
+      "fear": "varkos-x-quiet",
+      "happy": "varkos-x-happy",
+      "sad": "varkos-x-quiet"
+    },
+    "neutral": "varkos-x-neutral",
+    "alpha": 0.3
+  },
+  "approach": "https://huggingface.co/Sourajit123/SouraTTS"
+}

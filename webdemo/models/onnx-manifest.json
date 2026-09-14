@@ -1,0 +1,30 @@
+{
+  "flow_lm_main_delta_attn_flow_int8.onnx": {
+    "sha256": "cded084b8bdf9c7225130c3586db6d046291d72395f437ef502de630563c7f97",
+    "brotli_sha256": "6b2ba5d882a58b5c7607bec498f371a21086aefa18bbae1a1e5b2ba123843c95"
+  },
+  "flow_lm_main_delta_attn_flow_int8_soura.onnx": {
+    "sha256": "4d37ebc56a26e98cd53b4579e7d043fde3f2fc302dc14f2e13d67aed86ab9161",
+    "brotli_sha256": "b400f8bfe4d15fb68034db53643991ebeaf29fe0c4855811ab32a79cd471af86"
+  },
+  "flow_lm_main_delta_flow_int8.onnx": {
+    "sha256": "8300c745f41b611640b542e4ef3dd2203e2c4bc28e32975876ce4a923bd9f1d5",
+    "brotli_sha256": "c8fa42377da9224fa1eee8e64ead14e22333b48586680ca7884f4388862528b4"
+  },
+  "flow_lm_main_delta_flow_int8_soura.onnx": {
+    "sha256": "a47cd7de5ec0d5c91826de31fa457219d76009f229011de9e45ebdf36b60a867",
+    "brotli_sha256": "de30df965be5adee7d962cd92df2a652600d8e8a21bc4db7599f216742461b6f"
+  },
+  "mimi_decoder_delta_int8.onnx": {
+    "sha256": "cf6e85b2922db5323515ee8ace74dfa4c18a78565540f7ae37d2c66000094192",
+    "brotli_sha256": "105d9c50cc29ce473d5bd5e123dc03d65316e0a84ede53c63b304092a8de9c4d"
+  },
+  "mimi_encoder.onnx": {
+    "sha256": "853e2ca623b8782d94c3745ec6133bfdff7ce33d9b11128bd29ea03f28d76e3d",
+    "brotli_sha256": "a9e2194fb799c6d7cda8b11d67e4dccfd8bac475ea37673b5d171abc5d7fd4af"
+  },
+  "text_conditioner.onnx": {
+    "sha256": "4ecee995fb69f85c7a7493d11f7b5ee15d9950facc7ab3f5c9c49ef1e03847bb",
+    "brotli_sha256": "84356fde5f84257264174feebbf1d821e0334dd753b13df26c99efc1d1f23581"
+  }
+}

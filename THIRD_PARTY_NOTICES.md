@@ -14,8 +14,10 @@ License text: https://creativecommons.org/licenses/by/4.0/
 `alba-mackenna/casual.wav` sample using the native PocketTTS-RAVEN cache
 format.
 
-### Pocket TTS model-derived web assets — `webdemo/models/bos_before_voice.npy`, `webdemo/models/spm_vocab.json`
-Small runtime assets derived from the Pocket TTS model bundle. CC BY 4.0.
+### Pocket TTS models and model-derived web assets — `webdemo/models/`
+Compressed ONNX models, BOS tensor and tokenizer vocabulary derived from the
+Pocket TTS model bundle. CC BY 4.0.
+License text: https://creativecommons.org/licenses/by/4.0/
 Sources:
 
 - https://huggingface.co/kyutai/pocket-tts
@@ -24,8 +26,9 @@ Sources:
   file against a pinned sha256)
 - https://huggingface.co/Verylicious/pocket-tts-ungated
 
-The full ONNX model weights are intentionally ignored and are not distributed
-with this repository. Upstream model access includes prohibited-use terms;
+The seven browser ONNX models are distributed as Brotli-compressed files.
+This repository modifies the upstream graphs for delta caches, merged flow,
+custom attention, and optional layer-5 steering; see `tools/prepare_models.sh`. Upstream model access includes prohibited-use terms;
 users remain responsible for complying with the model card and applicable law.
 
 ### lame.js — `webdemo/vendor/lame.js`
@@ -58,7 +61,19 @@ License: https://github.com/microsoft/onnxruntime/blob/main/LICENSE
 
 ## Model weights
 
-Full ONNX model weights are **not** distributed with this repository. They are
-downloaded from upstream sources by `tools/prepare_models.sh` — see the
-Pocket TTS model card for weight licensing and prohibited-use terms. The small
-model-derived web assets that are distributed are listed above.
+The browser model set is distributed in `webdemo/models/*.onnx.br`, with
+compressed and uncompressed hashes in `onnx-manifest.json`. Unpack with
+`webdemo/unpack_models.py`, or regenerate from upstream with
+`tools/prepare_models.sh --web`. Native-only optimized models remain generated
+locally. See the Pocket TTS model card for model terms.
+
+## Optional emotion steering
+
+The opt-in layer-5 steering integration follows the SouraTTS inference approach:
+https://huggingface.co/Sourajit123/SouraTTS (release labeled MIT). No upstream Soura checkpoint or vector set is bundled in Git.
+The web demo bundles a Varkos neutral voice embedding (`webdemo/presets/varkos.emb`)
+and reference-derived vectors (`webdemo/models/soura_vectors.derived.npy`);
+their derivation and vector hash are recorded in the adjacent JSON file.
+The preset embedding comes from the Varkos Dramatic neutral reference; the
+steering directions come from the separate Varkos expressive references.
+Custom native vector provenance is recorded in `models/soura.json`. The base Pocket TTS model and reference-audio terms still apply.
