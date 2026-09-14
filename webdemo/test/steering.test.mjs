@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { controls, parseVectors, applyShift } from '../src/engine/steering.js';
+for (const value of [{emotion:'surprise'},{emotion:null},{intensity:1.20001},{intensity:'0.8'},{seed:-1},{seed:.5},{seed:2**53}])
+  assert.throws(()=>controls(true,value));
+assert.throws(()=>controls(false,{emotion:'happy'}));
+assert.equal(controls(false,{emotion:'happy',intensity:0}).intensity,0);
+assert.equal(controls(true,{}).emotion,'neutral');
+const buffer = new ArrayBuffer(128 + 6*1024*4);
+new Uint8Array(buffer).set([147,78,85,77,80,89,1,0,118,0]);
+new Uint8Array(buffer).set(new TextEncoder().encode("{'descr': '<f4', 'fortran_order': False, 'shape': (6, 1024), }".padEnd(117,' ')+'\n'),10);
+new Float32Array(buffer,128).fill(.125);
+const rows = parseVectors(buffer), shift = new Float32Array(1024);
+assert.equal(rows.length,6144); assert(rows.slice(0,1024).every(x=>x===0));
+applyShift(shift,rows,'happy',.8); assert(shift.some(x=>x!==0));
+applyShift(shift,rows,'neutral',1); assert(shift.every(x=>x===0));
+applyShift(shift,rows,'angry',0); assert(shift.every(x=>x===0));
+assert.throws(()=>parseVectors(buffer.slice(0,100)));
+assert.throws(()=>parseVectors(new Uint8Array(200).buffer));
+const invalid = buffer.slice(0); new DataView(invalid).setFloat32(invalid.byteLength-4,NaN,true);
+assert.throws(()=>parseVectors(invalid));
+console.log('Steering validation, zero bypass, vector loading: PASS');

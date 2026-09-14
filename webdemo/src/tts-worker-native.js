@@ -2,6 +2,7 @@
 // WASM, driven through its ptt_* C API. Speaks the exact same message
 // protocol as tts-worker.js, so the UI cannot tell the engines apart.
 import { Tokenizer } from "./engine/tokenizer.js";
+import { controls, parseVectors } from "./engine/steering.js";
 import { SilenceSqueeze } from "./engine/silence.js";
 
 // Fixed-memory module is ~10-25% faster (bounds-check elimination) but its
@@ -75,6 +76,8 @@ async function instantiateModule(prefer, assetBase) {
 let M = null;       // emscripten module
 let handle = 0;
 let api = null;
+let steering = false, prepareCaches = false, cacheVersion = "";
+let keepCommas = true;
 
 const SR = 24000;
 // The 16MB (br) voice encoder is only needed for cloning: fetched lazily on
@@ -160,7 +163,10 @@ const serialize = (fn) => { chain = chain.then(fn, fn); return chain; };
 
 // Async poll loop: never blocks the Emscripten runtime thread, so proxied
 // filesystem calls from the generator pthread keep being serviced.
-async function streamOut(text, voiceFile, temperature, emitChunks) {
+async function streamOut(text, voiceFile, temperature, emitChunks, request = {}) {
+  const selected = controls(steering, request);
+  if (api.set_emotion(handle, selected.emotion, selected.intensity) !== 0) throw new Error("Invalid emotion controls");
+  if (selected.seed !== undefined && api.set_seed(handle, selected.seed) !== 0) throw new Error("Invalid seed");
   api.set_temperature(handle, temperature);
   const ctx = api.stream_start(handle, text, voiceFile);
   if (!ctx) throw new Error("stream_start failed");
@@ -226,6 +232,31 @@ function encodeInWorker(key, wavBytes) {
   });
 }
 
+async function prepareInWorker(key) {
+  const emb = M.FS.readFile(`/voices/.cache/${key}.emb`);
+  await new Promise((resolve, reject) => {
+    const worker = moduleWorker(new URL("./prepare-worker.js", import.meta.url).href);
+    worker.onmessage = ({ data }) => {
+      worker.terminate();
+      if (!data.ok) { reject(new Error(data.message)); return; }
+      M.FS.writeFile(`/voices/.cache/${key}.kv`, new Uint8Array(data.kv));
+      // The files were copied in dependency order; don't inherit stale source timestamps.
+      resolve();
+    };
+    worker.onerror = (e) => { worker.terminate(); reject(new Error(e.message || "Cache worker failed")); };
+    worker.postMessage({ assetBase: savedAssetBase, modelsUrl: savedModelsUrl, key, emb: emb.buffer, soura: steering,
+      pool: Math.min(2, self.navigator?.hardwareConcurrency || 2) }, [emb.buffer]);
+  });
+  warmed.add(key);
+}
+
+function persistCaches(key) {
+  if (!prepareCaches) return;
+  const emb = M.FS.readFile(`/voices/.cache/${key}.emb`);
+  const kv = M.FS.readFile(`/voices/.cache/${key}.kv`);
+  post("voiceCaches", { key, embCache: emb.buffer, kvCache: kv.buffer, cacheVersion }, [emb.buffer, kv.buffer]);
+}
+
 // Cheap per-voice warm: start a generation and abort as soon as the first
 // chunk arrives — by then the voice embedding, conditioning pass and KV
 // snapshot are all cached. Costs ~conditioning + a few AR steps.
@@ -235,7 +266,13 @@ async function warmVoice(voiceKey) {
     await encodeInWorker(voiceKey, M.FS.readFile(`/voices/${voiceKey}.wav`));
     needsEncoder.delete(voiceKey);
   }
+  if (prepareCaches) {
+    await prepareInWorker(voiceKey);
+    persistCaches(voiceKey);
+    return;
+  }
   warmed.add(voiceKey);
+  api.set_emotion(handle, "neutral", 0);
   api.set_temperature(handle, 0.5);
   const ctx = api.stream_start(handle, "Hi.", `${voiceKey}.wav`);
   if (!ctx) { warmed.delete(voiceKey); return; }
@@ -258,7 +295,8 @@ async function warmVoice(voiceKey) {
 }
 
 const handlers = {
-  async init({ assetBase, modelsUrl, threads, pool: reqPool, spin, variant, bench }) {
+  async init({ assetBase, modelsUrl, threads, pool: reqPool, spin, variant, bench, soura = false, vectorsUrl, prepareCaches: prepare = false, keepCommas: commas = true }) {
+    steering = soura === true; prepareCaches = prepare === true; keepCommas = commas !== false;
     // Pool sizing, from measured sweeps (?pool=N overrides for tuning):
     //  - phones: 2. Only ~2 performance cores; ORT's parallel-for waits for
     //    the slowest partition, so anything scheduled on an E-core gates
@@ -274,6 +312,9 @@ const handlers = {
     api = {
       create: M.cwrap("ptt_create", "number",
         ["string", "string", "string", "string", "number", "number", "number"]),
+      set_emotion: M.cwrap("ptt_set_emotion", "number", ["number", "string", "number"]),
+      set_seed: M.cwrap("ptt_set_seed", "number", ["number", "number"]),
+      load_vectors: M.cwrap("ptt_load_soura_vectors", "number", ["number", "string"]),
       set_temperature: M.cwrap("ptt_set_temperature", null, ["number", "number"]),
       stream_start: M.cwrap("ptt_stream_start", "number", ["number", "string", "string"]),
       stream_read: M.cwrap("ptt_stream_read", "number", ["number", "number", "number"]),
@@ -290,8 +331,24 @@ const handlers = {
 
     let base = 0;
     for (const name of MODELS) {
-      await fetchInto(`/models/${name}`, `${modelsUrl}/${name}`, "Downloading models (67 MB)", base, WEIGHTS[name]);
+      const file = steering && name.startsWith("flow_lm_main") ? name.replace(".onnx", "_soura.onnx") : name;
+      await fetchInto(`/models/${file}`, `${modelsUrl}/${file}`, "Downloading models", base, WEIGHTS[name]);
+      if (file !== name) M.FS.symlink(`/models/${file}`, `/models/${name}`);
       base += WEIGHTS[name];
+    }
+    if (steering) {
+      const response = await fetch(vectorsUrl || `${modelsUrl}/soura_vectors.npy`);
+      if (!response.ok) throw new Error(`Unable to load steering vectors: HTTP ${response.status}`);
+      const buffer = await response.arrayBuffer();
+      parseVectors(buffer);
+      M.FS.writeFile("/models/soura_vectors.npy", new Uint8Array(buffer));
+    }
+    if (prepareCaches) {
+      const bytes = M.FS.readFile("/models/flow_lm_main_delta_attn_flow_int8.onnx");
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const bos = await crypto.subtle.digest("SHA-256", M.FS.readFile("/models/bos_before_voice.npy"));
+      const hex = (b) => Array.from(new Uint8Array(b), n => n.toString(16).padStart(2, "0")).join("");
+      cacheVersion = `kv-v1:${hex(digest)}:${hex(bos)}`;
     }
     // Tokenization is delegated from C++ to the validated JS implementation.
     const vocab = await (await fetch(`${modelsUrl}/spm_vocab.json`)).json();
@@ -302,12 +359,12 @@ const handlers = {
     M.cwrap("ptt_configure_pool", null, ["number", "number"])(pool, spin === 0 ? 0 : 1);
     handle = M.cwrap("ptt_create_ex", "number",
       ["string", "string", "string", "string", "number", "number", "number", "number"])(
-      "/models", "/voices", "/models/tokenizer.model", "int8", 0.7, 1, pool, 2 /* defer encoder */);
+      "/models", "/voices", "/models/tokenizer.model", "int8", 0.7, 1, pool, 2 | (steering ? 8 : 0) /* defer encoder + optional steering */);
     if (!handle) throw new Error("ptt_create failed (see console)");
     // Web demo speaks prose: let the model see commas and phrase clauses
     // itself (the game build keeps the soften-commas default).
-    M.cwrap("ptt_set_soften_commas", null, ["number", "number"])(handle, 0);
-    post("ready", { sr: SR, variant: variantLoaded, pool, spin: spin === 0 ? 0 : 1 });
+    M.cwrap("ptt_set_soften_commas", null, ["number", "number"])(handle, keepCommas ? 0 : 1);
+    post("ready", { sr: SR, variant: variantLoaded, pool, spin: spin === 0 ? 0 : 1, soura: steering, samplingSeed: true, prepareCaches, cacheVersion });
     if (bench) {
       // Isolated on-device numbers: AR step + 15-frame decoder chunk.
       const db = M.cwrap("ptt_debug_bench", "number", ["number", "number", "number", "number"]);
@@ -335,19 +392,22 @@ const handlers = {
     post("progress", { label: "Encoding + conditioning voice", pct: 0.5 });
     // Warm: run a short synthesis; encode_voice + KV conditioning results are
     // cached in the engine (memory + MEMFS), exactly like the native CLI.
-    await streamOut("Hi.", `${key}.wav`, 0.7, false);
+    if (prepareCaches) await prepareInWorker(key);
+    else await streamOut("Hi.", `${key}.wav`, 0.7, false);
     // Persist the source WAV via the app's OPFS store (engine re-derives the
     // caches from it on restore).
     const wav = M.FS.readFile(`/voices/${key}.wav`);
     post("voice", { key, label, builtin: false, embDims: null, emb: wav.buffer },
          [wav.buffer]);
+    persistCaches(key);
   },
 
   async clone(payload) {
     await serialize(() => handlers.cloneInner(payload));
   },
 
-  async restoreVoice({ key, label, embDims, emb, embCache, capSeconds }) {
+  async restoreVoice({ key, label, embDims, emb, embCache, kvCache, cacheVersion: version, capSeconds }) {
+    warmed.delete(key);
     if (embDims && embDims.length) {
       // TS-engine record: a raw float voice embedding. Write it as an EMB1
       // cache file — the engine then treats it exactly like a preset.
@@ -378,10 +438,15 @@ const handlers = {
         needsEncoder.add(key);
       }
     }
+    if (prepareCaches && kvCache && embCache && version === cacheVersion) {
+      M.FS.writeFile(`/voices/.cache/${key}.kv`, new Uint8Array(kvCache));
+      warmed.add(key);
+    }
     post("voice", { key, label, builtin: false });
   },
 
   async dropVoice({ key }) {
+    warmed.delete(key); needsEncoder.delete(key);
     for (const p of [`/voices/${key}.wav`, `/voices/.cache/${key}.emb`, `/voices/.cache/${key}.kv`]) {
       try { M.FS.unlink(p); } catch (e) { /* absent is fine */ }
     }
@@ -411,6 +476,18 @@ const handlers = {
     });
   },
 
+  async loadVectors({ buffer }) {
+    await serialize(async () => {
+      if (!steering) throw new Error("Enable steering before loading vectors");
+      parseVectors(buffer);
+      M.FS.writeFile("/models/custom_vectors.npy", new Uint8Array(buffer));
+      try {
+        if (api.load_vectors(handle, "/models/custom_vectors.npy") !== 0) throw new Error("Invalid vector file");
+      } finally { M.FS.unlink("/models/custom_vectors.npy"); }
+      post("vectorsLoaded", {});
+    });
+  },
+
   async stop() {
     if (activeStream) api.stream_stop(activeStream);
   },
@@ -424,6 +501,7 @@ const handlers = {
     // One tiny silent generation: warms the voice-conditioning KV cache,
     // ORT arenas, and hot wasm kernels before the user's first Speak.
     await serialize(async () => {
+      if (prepareCaches) { await warmVoice(voiceKey); return; }
       await streamOut("Hi.", `${voiceKey}.wav`, 0.5, false);
       warmed.add(voiceKey);
     });
@@ -433,25 +511,28 @@ const handlers = {
     await serialize(() => warmVoice(voiceKey));
   },
 
-  async speak({ text, voiceKey, temperature }) {
+  async speak({ text, voiceKey, temperature, emotion, intensity, seed }) {
+    const selected = controls(steering, { emotion, intensity, seed });
     await serialize(async () => {
       if (needsEncoder.has(voiceKey)) {
         await encodeInWorker(voiceKey, M.FS.readFile(`/voices/${voiceKey}.wav`));
         needsEncoder.delete(voiceKey);
       }
+      if (prepareCaches) await warmVoice(voiceKey);
       warmed.add(voiceKey); // a full speak conditions it as a side effect
-      post("speakStarted", {});
+      post("speakStarted", selected);
       // Presets resolve via /voices/.cache/{key}.emb even when the .wav is absent.
-      const total = await streamOut(text, `${voiceKey}.wav`, temperature ?? 0.45, true);
+      const total = await streamOut(text, `${voiceKey}.wav`, temperature ?? 0.45, true, selected);
       post("speakDone", { totalSamples: total });
     });
   },
 };
 
 self.onmessage = async (e) => {
-  const { type, ...payload } = e.data;
+  const { type, id, ...payload } = e.data;
   try {
     await handlers[type](payload);
+    if (id) post("ack", { id });
   } catch (err) {
     post("error", { message: String(err && err.message || err), during: type });
   }

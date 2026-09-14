@@ -118,11 +118,14 @@ if [ "${1:-}" = "--web" ]; then
              bos_before_voice.npy; do
         cp models/$f webdemo/models/
     done
-    echo "  (spm_vocab.json ships with the repo)"
-    if command -v uv >/dev/null; then
-        step "Precompressing for serving (brotli, optional)"
-        uv run --no-project --with brotli python webdemo/compress.py || true
-    fi
+    step "Steering graphs for the default web UI (Varkos vectors ship in Git)"
+    "${PY_ONNX[@]}" tools/make_soura_onnx.py --models webdemo/models \
+        --vectors webdemo/models/soura_vectors.derived.npy \
+        --source 'Varkos reference-derived vectors; see soura_vectors.derived.json'
+    echo "  (spm_vocab.json and the default vector set ship with the repo)"
+    step "Precompressing and checking the complete web asset set"
+    uv run --no-project --with brotli python webdemo/compress.py
+    uv run --no-project --with brotli python webdemo/check_assets.py
 fi
 
 echo

@@ -172,7 +172,7 @@ if (w.PKTTS_UNSUPPORTED) {
 		if (isNew) app.state.voices.push ({ key: v.key, label: v.label, builtin: v.builtin });
 		// The preset is the default: it claims selection even if a restored
 		// cloned voice arrived first — unless the user already chose one.
-		if (!app.state.activeVoice || (v.builtin && !app.state.userPickedVoice)) {
+		if (!app.state.activeVoice || (v.key === 'varkos' && !app.state.userPickedVoice)) {
 			app.state.activeVoice = v.key;
 		}
 		if (!v.builtin && v.emb) {
@@ -383,9 +383,50 @@ if (w.PKTTS_UNSUPPORTED) {
 			lastSpeakRequestAt = now;
 			speakableCheck (text);
 			app.fireEvent ('SpeakRequest', { text: text, voiceKey: app.state.activeVoice,
-				temperature: app.state.temperature });
+				temperature: app.state.temperature, emotion: app.state.steering ? app.state.emotion : 'neutral',
+				intensity: app.state.steering ? app.state.intensity : 0, seed: el ('sampling-seed').value === '' ? undefined : Number (el ('sampling-seed').value) });
 	}
 	el ('speak').onclick = requestSpeak;
+
+	// Optional steering and disposable preparation: URL flags survive engine restarts.
+	(function () {
+		el ('steering-enabled').checked = app.state.steering;
+		el ('prepare-caches').checked = app.state.prepareCaches;
+		el ('vector-set').value = 'default';
+		function reloadFlag (name, on) {
+			var url = new URL (w.location.href);
+			if (name === 'soura') {
+				if (on) url.searchParams.delete (name); else url.searchParams.set (name, '0');
+			} else if (on) url.searchParams.set (name, '1'); else url.searchParams.delete (name);
+			url.searchParams.delete ('ui');
+			w.location.href = url.href;
+		}
+		el ('steering-enabled').disabled = app.state.engine === 'split';
+		el ('prepare-caches').disabled = app.state.engine !== 'native';
+		el ('steering-enabled').onchange = function () { reloadFlag ('soura', this.checked); };
+		el ('prepare-caches').onchange = function () { reloadFlag ('prepareCaches', this.checked); };
+		['emotion','emotion-intensity','vector-set','vector-file'].forEach (function (id) { el (id).disabled = !app.state.steering; });
+		el ('sampling-seed').disabled = app.state.engine === 'split';
+		el ('emotion').onchange = function () { app.state.emotion = this.value; };
+		el ('emotion-intensity').oninput = function () {
+			app.state.intensity = Number (this.value);
+			el ('emotion-strength').value = this.value;
+		};
+		el ('emotion-strength').disabled = !app.state.steering;
+		el ('emotion-strength').oninput = function () {
+			el ('emotion-intensity').value = this.value;
+			app.state.intensity = Number (this.value);
+		};
+		el ('vector-file').onchange = async function () {
+			if (!this.files[0]) return;
+			try {
+				if (this.files[0].size > 65536) throw new Error ('Expected a [6,1024] float32 NPY file');
+				app.fireEvent ('VectorsRequest', await this.files[0].arrayBuffer ());
+			} catch (error) { toast (error.message); }
+		};
+
+		app.listenFor ('VectorsLoaded', function () { el ('vector-status').textContent = 'Custom vectors loaded for this session.'; });
+	})();
 
 	// temperature slider (persisted)
 	(function () {

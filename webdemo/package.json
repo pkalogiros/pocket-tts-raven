@@ -4,8 +4,12 @@
   "type": "module",
   "description": "PocketTTS in the browser: voice cloning + speech on onnxruntime-web",
   "scripts": {
-    "test": "node test/tokenizer.test.mjs && node test/xfer.test.mjs && node test/engine.test.mjs",
-    "serve": "python3 serve.py"
+    "test": "node test/tokenizer.test.mjs && node test/xfer.test.mjs && node test/engine.test.mjs && node test/steering.test.mjs",
+    "serve": "python3 serve.py",
+    "test:wasm": "node wasm/test-steering-node.mjs && node wasm/test-steering-node.mjs --growth",
+    "test:browser": "node test/steering-browser.mjs",
+    "check:assets": "python3 check_assets.py",
+    "test:assets": "python3 -m unittest discover -s test -p test_assets.py"
   },
   "devDependencies": {
     "onnxruntime-web": "^1.27.0"

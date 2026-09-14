@@ -77,8 +77,10 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <fstream>
@@ -214,6 +216,9 @@ struct Config {
     bool decoder_convtr = true;
     bool merged_flow = true;
     bool combine_first_step = false;
+    bool conditioning_only = false; // Disposable KV preparation from cached embeddings.
+    bool soura = false;
+    std::string soura_vectors; // Empty: models_dir/soura_vectors.npy.
 };
 
 struct AudioData {
@@ -1514,6 +1519,7 @@ class StatefulRunner {
     Ort::MemoryInfo mem_;
     StateBufferIO state_;
     std::unique_ptr<Ort::IoBinding> binding_;
+    Ort::Value soura_shift_{nullptr};
     
     // FP16 writeback fixup: detects when ORT ignores pre-bound output buffer
     // and copies just the modified cache positions from ORT's temp to ours.
@@ -1593,6 +1599,8 @@ class StatefulRunner {
         for (size_t i = 0; i < in_names.size(); ++i) {
             if (in_names[i].find("state_") == 0) {
                 active_binding.BindInput(in_names[i].c_str(), state_.create_input_value(state_idx++, mem_));
+            } else if (in_names[i] == "soura_shift") {
+                active_binding.BindInput("soura_shift", soura_shift_);
             } else {
                 active_binding.BindInput(in_names[i].c_str(), non_state_inputs[non_state_idx++]);
             }
@@ -1671,6 +1679,10 @@ class StatefulRunner {
     }
     
 public:
+    void set_soura_buffer(float* data) {
+        const int64_t shape[] = {1, 1, 1024};
+        soura_shift_ = Ort::Value::CreateTensor<float>(mem_, data, 1024, shape, 3);
+    }
     StatefulRunner(OrtSession& sess, bool delta_kv_outputs = false, bool single_buffer_large_f32_cache = false)
         : sess_(sess),
           mem_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)),
@@ -1988,6 +2000,10 @@ public:
             enc_ = std::make_unique<OrtSession>(env, cfg_.models_dir + "/mimi_encoder.onnx", opts_enc, "mimi_encoder");
         }
         txt_ = std::make_unique<OrtSession>(env, cfg_.models_dir + "/text_conditioner.onnx", opts_full, "text_conditioner");
+        if (cfg_.soura) {
+            main_path.insert(main_path.size() - 5, "_soura");
+            load_soura_vectors(cfg_.soura_vectors.empty() ? cfg_.models_dir + "/soura_vectors.npy" : cfg_.soura_vectors);
+        }
         main_ = std::make_unique<OrtSession>(env, main_path, opts_main,
                                              main_merged_flow ? (main_custom_attention ? "flow_lm_main_delta_attn_flow" + sfx
                                                                                        : "flow_lm_main_delta_flow" + sfx) :
@@ -2001,13 +2017,14 @@ public:
         if (!main_merged_flow || file_exists(flow_path)) {
             flow_ = std::make_unique<OrtSession>(env, flow_path, opts_flow, "flow_lm_flow" + sfx);
         }
-        dec_ = std::make_unique<OrtSession>(env, dec_path, opts_dec,
+        if (!cfg_.conditioning_only) dec_ = std::make_unique<OrtSession>(env, dec_path, opts_dec,
                                             dec_custom_convtr ? "mimi_decoder_delta_convtr" + sfx :
                                             (dec_custom_attention ? "mimi_decoder_delta_attn" + sfx :
                                             (dec_delta_kv ? "mimi_decoder_delta" + sfx : "mimi_decoder" + sfx)));
         
         main_runner_ = std::make_unique<StatefulRunner>(*main_, main_delta_kv);
-        dec_runner_ = std::make_unique<StatefulRunner>(*dec_, dec_delta_kv, true);
+        if (cfg_.soura) main_runner_->set_soura_buffer(soura_shift_.data());
+        if (dec_) dec_runner_ = std::make_unique<StatefulRunner>(*dec_, dec_delta_kv, true);
 
         if (load_npy_float32(cfg_.models_dir + "/bos_before_voice.npy", bos_before_voice_)) {
             if (bos_before_voice_.shape.size() != 3 ||
@@ -2185,6 +2202,30 @@ public:
     void set_temperature(float t) { cfg_.temperature = t; }
     void set_soften_commas(bool v) { cfg_.soften_commas = v; }
     void set_max_chunk_frames(int n) { cfg_.max_chunk_frames = n; }
+    void load_soura_vectors(const std::string& path) {
+        if (!cfg_.soura) throw std::invalid_argument("Steering was not enabled at creation");
+        Tensor vectors;
+        if (!load_npy_float32(path, vectors) || vectors.shape != std::vector<int64_t>({6, 1024}) ||
+            !std::all_of(vectors.data.begin(), vectors.data.end(), [](float v) { return std::isfinite(v); }))
+            throw std::invalid_argument("Expected finite float32 steering vectors of shape [6,1024]");
+        soura_vectors_ = std::move(vectors);
+        soura_shift_.fill(0);
+    }
+    void set_emotion(const std::string& emotion, double intensity) {
+        static const std::array<std::string, 6> labels = {"neutral", "angry", "disgust", "fear", "happy", "sad"};
+        const auto label = std::find(labels.begin(), labels.end(), emotion.empty() ? "neutral" : emotion);
+        if (label == labels.end() || !std::isfinite(intensity) || intensity < 0 || intensity > 1.2)
+            throw std::invalid_argument("Invalid emotion or intensity (expected 0 to 1.2)");
+        const size_t index = size_t(label - labels.begin());
+        if (!cfg_.soura && index != 0 && intensity > 0)
+            throw std::invalid_argument("Emotion steering requires --soura");
+        // Last-block output steering cannot modify the preceding attention KV caches.
+        // The same cached voice state remains valid across emotions and intensities.
+        for (size_t i = 0; i < soura_shift_.size(); ++i)
+            soura_shift_[i] = index == 0 || intensity == 0 ? 0 : soura_vectors_.data[index * 1024 + i] * intensity;
+    }
+    void set_seed(uint64_t seed) { rng::seed(seed); }
+    void prepare_voice_cache(const std::string& voice);
 
     // Disposable encode-worker path: encode a voice file, caching its .emb.
     void encode_voice_file(const std::string& voice) { get_voice(voice); }
@@ -2294,6 +2335,8 @@ public:
 
 private:
     Config cfg_;
+    Tensor soura_vectors_;
+    std::array<float, 1024> soura_shift_{};
     std::unique_ptr<OrtSession> enc_, txt_, main_, flow_, dec_;
     int enc_threads_ = 2;
     std::unique_ptr<Tokenizer> tok_;
@@ -2666,6 +2709,19 @@ private:
         return gen;
     }
 };
+
+// Run in a disposable CLI process so conditioning allocations are released on exit.
+void PocketTTS::prepare_voice_cache(const std::string& voice) {
+    if (!cfg_.voice_cache) throw std::invalid_argument("Cache preparation requires disk caching");
+    set_emotion("neutral", 0);
+    const Tensor& embedding = get_voice(voice);
+    auto gen = make_gen(embedding, tokenize("Ready."), 0, 0);
+    for (const auto* ext : {"emb", "kv"}) {
+        const auto path = cache::get_cache_path(cfg_.voices_dir, voice_kv_path_, ext);
+        if (!cache::is_cache_valid(resolve_voice_path(voice), path))
+            throw std::runtime_error("Could not write voice cache");
+    }
+}
 
 // Required for C++17 ODR-use of constexpr static members
 constexpr int64_t PocketTTS::LatentGen::curr_shape_[3];
@@ -3259,6 +3315,71 @@ struct HttpRequest {
     }
 };
 
+// Locate a top-level control without mistaking quoted text or nested fields for it.
+static size_t json_control_value(const std::string& json, const std::string& key) {
+    int depth = 0;
+    for (size_t i = 0; i < json.size(); ++i) {
+        char c = json[i];
+        if (c == '{' || c == '[') { ++depth; continue; }
+        if (c == '}' || c == ']') { --depth; continue; }
+        if (c != '"') continue;
+        size_t start = ++i;
+        while (i < json.size() && json[i] != '"') {
+            if (json[i] == '\\') ++i;
+            ++i;
+        }
+        size_t end = i, value = i + 1;
+        while (value < json.size() && std::isspace(static_cast<unsigned char>(json[value]))) ++value;
+        if (depth == 1 && json.compare(start, end - start, key) == 0 &&
+            value < json.size() && json[value] == ':') {
+            do { ++value; } while (value < json.size() && std::isspace(static_cast<unsigned char>(json[value])));
+            return value;
+        }
+    }
+    return std::string::npos;
+}
+
+static double json_get_number(const std::string& json, const std::string& key, double fallback) {
+    size_t pos = json_control_value(json, key);
+    if (pos == std::string::npos) return fallback;
+    size_t end = pos;
+    if (end < json.size() && json[end] == '-') ++end;
+    auto digit = [&](size_t i) { return i < json.size() && json[i] >= '0' && json[i] <= '9'; };
+    if (!digit(end)) throw std::invalid_argument("Invalid numeric control");
+    if (json[end] == '0') ++end;
+    else while (digit(end)) ++end;
+    if (end < json.size() && json[end] == '.') {
+        if (!digit(++end)) throw std::invalid_argument("Invalid numeric control");
+        while (digit(end)) ++end;
+    }
+    if (end < json.size() && (json[end] == 'e' || json[end] == 'E')) {
+        ++end;
+        if (end < json.size() && (json[end] == '+' || json[end] == '-')) ++end;
+        if (!digit(end)) throw std::invalid_argument("Invalid numeric control");
+        while (digit(end)) ++end;
+    }
+    const double value = std::strtod(json.c_str() + pos, nullptr);
+    while (end < json.size() && std::isspace(static_cast<unsigned char>(json[end]))) ++end;
+    if (!std::isfinite(value) || end == json.size() || (json[end] != ',' && json[end] != '}'))
+        throw std::invalid_argument("Invalid numeric control");
+    return value;
+}
+
+static std::string json_get_emotion(const std::string& json) {
+    size_t pos = json_control_value(json, "emotion");
+    if (pos == std::string::npos) return "neutral";
+    if (pos == json.size() || json[pos] != '"') throw std::invalid_argument("Invalid emotion");
+    size_t end = json.find('"', pos + 1);
+    if (end == std::string::npos) throw std::invalid_argument("Invalid emotion");
+    const auto value = json.substr(pos + 1, end - pos - 1);
+    if (value.empty()) throw std::invalid_argument("Invalid emotion");
+    ++end;
+    while (end < json.size() && std::isspace(static_cast<unsigned char>(json[end]))) ++end;
+    if (end == json.size() || (json[end] != ',' && json[end] != '}'))
+        throw std::invalid_argument("Invalid emotion");
+    return value;
+}
+
 static std::string json_get_string(const std::string& json, const std::string& key) {
     std::string search = "\"" + key + "\"";
     size_t pos = json.find(search);
@@ -3621,7 +3742,8 @@ private:
         }
 
         if (req.method == "GET" && req.path == "/health") {
-            send_response(client_fd, 200, "application/json", "{\"status\":\"ok\"}");
+            send_response(client_fd, 200, "application/json", std::string("{\"status\":\"ok\",\"soura\":") +
+                (tts_.config().soura ? "true" : "false") + ",\"sampling_seed\":true}");
         }
         else if (req.method == "POST" && req.path == "/tts") {
             std::string text = json_get_string(req.body, "text");
@@ -3639,6 +3761,13 @@ private:
 
             bool header_sent = false;
             try {
+                const double intensity = json_get_number(req.body, "intensity", 1.0);
+                const double seed = json_get_number(req.body, "seed", std::numeric_limits<double>::quiet_NaN());
+                if (!std::isnan(seed) && (seed < 0 || seed > 9007199254740991.0 || std::floor(seed) != seed))
+                    throw std::invalid_argument("Seed must be a nonnegative safe integer");
+                std::lock_guard<std::mutex> lock(tts_mutex_);
+                tts_.set_emotion(json_get_emotion(req.body), intensity);
+                if (!std::isnan(seed)) tts_.set_seed(uint64_t(seed));
                 set_tts_thread_qos();
                 header_sent = send_chunked_header(client_fd, s16_pcm
                     ? "audio/pcm;rate=24000;encoding=signed-integer;bits=16"
@@ -3651,7 +3780,6 @@ private:
                 std::vector<int16_t> pcm16;
 
                 {
-                    std::lock_guard<std::mutex> lock(tts_mutex_);
                     tts_.stream(text, voice, [&](const float* samples, size_t n) {
                         if (first_chunk) {
                             auto now = std::chrono::high_resolution_clock::now();
@@ -3726,6 +3854,7 @@ private:
                 AudioData audio;
                 {
                     std::lock_guard<std::mutex> lock(tts_mutex_);
+                    tts_.set_emotion("neutral", 0);
                     audio = tts_.generate(text, voice);
                 }
                 
@@ -3798,6 +3927,12 @@ void* ptt_create_ex(const char* models_dir, const char* voices_dir,
         cfg.decoder_only = (flags & 1) != 0;
         cfg.defer_encoder = (flags & 2) != 0;
         cfg.encoder_only = (flags & 4) != 0;
+        cfg.soura = (flags & 8) != 0;
+        cfg.conditioning_only = (flags & 16) != 0;
+        if (cfg.conditioning_only) cfg.defer_encoder = true;
+        if ((cfg.decoder_only && (cfg.encoder_only || cfg.conditioning_only || cfg.soura)) ||
+            (cfg.encoder_only && (cfg.conditioning_only || cfg.soura)))
+            throw std::invalid_argument("Incompatible engine creation flags");
         return new pocket_tts::PocketTTS(cfg);
     } catch (const std::exception& e) {
         std::cerr << "[pocket-tts] init error: " << e.what() << "\n";
@@ -3829,6 +3964,31 @@ void ptt_decoder_reset(void* handle) {
 
 void ptt_set_temperature(void* handle, float temperature) {
     if (handle) static_cast<pocket_tts::PocketTTS*>(handle)->set_temperature(temperature);
+}
+
+// Call only while the handle has no active stream; the worker serializes calls.
+int ptt_set_emotion(void* handle, const char* emotion, double intensity) {
+    if (!handle || !emotion) return -1;
+    try { static_cast<pocket_tts::PocketTTS*>(handle)->set_emotion(emotion, intensity); return 0; }
+    catch (const std::exception& e) { std::cerr << "[pocket-tts] " << e.what() << "\n"; return -1; }
+}
+
+int ptt_set_seed(void* handle, double seed) {
+    if (!handle || !std::isfinite(seed) || seed < 0 || seed > 9007199254740991.0 || std::floor(seed) != seed) return -1;
+    static_cast<pocket_tts::PocketTTS*>(handle)->set_seed(static_cast<uint64_t>(seed));
+    return 0;
+}
+
+int ptt_load_soura_vectors(void* handle, const char* path) {
+    if (!handle || !path) return -1;
+    try { static_cast<pocket_tts::PocketTTS*>(handle)->load_soura_vectors(path); return 0; }
+    catch (const std::exception& e) { std::cerr << "[pocket-tts] " << e.what() << "\n"; return -1; }
+}
+
+int ptt_prepare_voice(void* handle, const char* voice) {
+    if (!handle || !voice) return -1;
+    try { static_cast<pocket_tts::PocketTTS*>(handle)->prepare_voice_cache(voice); return 0; }
+    catch (const std::exception& e) { std::cerr << "[pocket-tts] " << e.what() << "\n"; return -1; }
 }
 
 void ptt_configure_pool(int threads, int spin) {
@@ -4141,7 +4301,11 @@ int main(int argc, char* argv[]) {
     bool stdout_output = false;
     bool server_mode = false;
     int server_port = 8080;
-    std::string text, voice, output;
+    std::string text, voice, output, prepare_voice;
+    std::string emotion = "neutral";
+    double intensity = 1.0;
+    uint64_t seed = 0;
+    bool seed_set = false, controls_set = false;
     int pos = 0;
     bool first_chunk_set = false;
     
@@ -4173,6 +4337,12 @@ int main(int argc, char* argv[]) {
                 "  --max-chunk <int>        Max frames per decode chunk (default: 15)\n"
                 "  --no-cache               Disable all disk caching (.emb and .kv files)\n"
                 "  --keep-commas            Preserve comma/semicolon/colon pauses\n"
+                "  --soura                  Enable optional emotion steering (default: off)\n"
+                "  --soura-vectors <path>   Custom [6,1024] float32 NPY; requires --soura\n"
+                "  --emotion <label>        CLI emotion (default: neutral); requires --soura\n"
+                "  --intensity <0..1.2>     CLI steering strength (default: 1)\n"
+                "  --seed <integer>         CLI sampling seed (default: random)\n"
+                "  --prepare-voice <voice>  Build embedding/KV caches and exit, without audio\n"
                 "  --fast-start             Fuller first chunk and shorter fade-in, keeps silence trimming\n"
                 "  --low-latency            Skip startup leading gate and use a shorter fade-in\n"
                 "  --trim-leading           Keep startup leading gate in low-latency mode\n"
@@ -4213,6 +4383,27 @@ int main(int argc, char* argv[]) {
         else if (a == "--max-chunk") cfg.max_chunk_frames = std::stoi(next());
         else if (a == "--no-cache") cfg.voice_cache = false;
         else if (a == "--keep-commas") cfg.soften_commas = false;
+        else if (a == "--soura") cfg.soura = true;
+        else if (a == "--soura-vectors") cfg.soura_vectors = next();
+        else if (a == "--emotion") { emotion = next(); controls_set = true; }
+        else if (a == "--intensity" || a == "--seed") {
+            const std::string value = next();
+            try {
+                if (value.find_first_of(",{}[]") != std::string::npos) throw std::invalid_argument("Expected number");
+                const double number = pocket_tts::json_get_number("{\"value\":" + value + "}", "value", -1);
+                if (a == "--intensity") {
+                    if (number < 0 || number > 1.2) throw std::invalid_argument("Expected 0 to 1.2");
+                    intensity = number; controls_set = true;
+                } else {
+                    if (number < 0 || number > 9007199254740991.0 || std::floor(number) != number)
+                        throw std::invalid_argument("Expected nonnegative safe integer");
+                    seed = static_cast<uint64_t>(number); seed_set = true;
+                }
+            } catch (const std::exception& error) {
+                std::cerr << "Invalid " << a << ": " << error.what() << "\n"; return 1;
+            }
+        }
+        else if (a == "--prepare-voice") prepare_voice = next();
         else if (a == "--fast-start") cfg.fast_start = true;
         else if (a == "--low-latency") cfg.low_latency = true;
         else if (a == "--trim-leading") cfg.force_leading_trim = true;
@@ -4237,11 +4428,19 @@ int main(int argc, char* argv[]) {
         else { if (pos == 0) text = a; else if (pos == 1) voice = a; else if (pos == 2) output = a; pos++; }
     }
 
+    if ((!cfg.soura && (!cfg.soura_vectors.empty() || controls_set)) ||
+        (server_mode && (controls_set || seed_set || !prepare_voice.empty())) ||
+        (!prepare_voice.empty() && (pos || stdout_output || !cfg.voice_cache || controls_set || seed_set))) {
+        std::cerr << "Steering controls require --soura. CLI controls and --prepare-voice cannot be used with --server; "
+                     "cache preparation requires caching and no synthesis arguments.\n";
+        return 1;
+    }
+
     if (cfg.fast_start) {
         if (!first_chunk_set) cfg.first_chunk_frames = 4;
     }
     
-    if (!server_mode) {
+    if (!server_mode && prepare_voice.empty()) {
         if (pos < 2) { std::cerr << "Need: TEXT VOICE [OUTPUT]\n"; return 1; }
         if (pos < 3 && !stdout_output) { std::cerr << "Need OUTPUT file (or use --stdout)\n"; return 1; }
         
@@ -4266,6 +4465,15 @@ int main(int argc, char* argv[]) {
             std::cerr << "  Loaded in " << std::fixed << std::setprecision(2) << elapsed() << "s\n";
         }
         
+        if (!prepare_voice.empty()) {
+            tts.prepare_voice_cache(prepare_voice);
+            std::cerr << "Voice caches ready: " << prepare_voice << "\n";
+            return 0;
+        }
+        if (!server_mode) {
+            tts.set_emotion(emotion, intensity);
+            if (seed_set) tts.set_seed(seed);
+        }
         if (server_mode) {
             double warmup_ms = tts.warmup();
             std::cerr << "  Warmup in " << std::fixed << std::setprecision(0) << warmup_ms << "ms\n";

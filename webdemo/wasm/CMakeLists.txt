@@ -54,7 +54,7 @@ target_include_directories(pocket-tts-wasm PRIVATE
 # Match the ORT static lib's build mode: classic emscripten exceptions enabled.
 target_compile_options(pocket-tts-wasm PRIVATE -O3 -pthread -msimd128 -sDISABLE_EXCEPTION_CATCHING=0)
 
-set(EXPORTED_FUNCS "_ptt_create,_ptt_create_ex,_ptt_create_profiled,_ptt_load_encoder,_ptt_encode_voice,_ptt_decode,_ptt_decoder_reset,_ptt_destroy,_ptt_warmup,_ptt_set_temperature,_ptt_set_soften_commas,_ptt_set_max_chunk,_ptt_stream_start,_ptt_stream_read,_ptt_stream_poll,_ptt_stream_stop,_ptt_latents_start,_ptt_latents_poll,_ptt_latents_stop,_ptt_latents_end,_ptt_stream_end,_ptt_free_audio,_ptt_set_profiling,_ptt_configure_pool,_ptt_debug_bench,_ptt_print_profile,_malloc,_free")
+set(EXPORTED_FUNCS "_ptt_set_emotion,_ptt_set_seed,_ptt_load_soura_vectors,_ptt_prepare_voice,_ptt_create,_ptt_create_ex,_ptt_create_profiled,_ptt_load_encoder,_ptt_encode_voice,_ptt_decode,_ptt_decoder_reset,_ptt_destroy,_ptt_warmup,_ptt_set_temperature,_ptt_set_soften_commas,_ptt_set_max_chunk,_ptt_stream_start,_ptt_stream_read,_ptt_stream_poll,_ptt_stream_stop,_ptt_latents_start,_ptt_latents_poll,_ptt_latents_stop,_ptt_latents_end,_ptt_stream_end,_ptt_free_audio,_ptt_set_profiling,_ptt_configure_pool,_ptt_debug_bench,_ptt_print_profile,_malloc,_free")
 set(RUNTIME_METHODS "ccall,cwrap,FS,UTF8ToString,stringToUTF8,lengthBytesUTF8,HEAPF32,HEAPU8,HEAPU32")
 
 target_link_options(pocket-tts-wasm PRIVATE

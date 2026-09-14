@@ -222,7 +222,8 @@ async function warmVoice(voiceKey) {
 }
 
 const handlers = {
-  async init({ assetBase, modelsUrl, threads, arPool: reqAr, decPool: reqDec, spin, variant, bench }) {
+  async init({ assetBase, modelsUrl, threads, arPool: reqAr, decPool: reqDec, spin, variant, bench, soura, prepareCaches }) {
+    if (soura || prepareCaches) throw new Error("Steering and disposable KV preparation require the native engine, not experimental split mode");
     // Pool sizing, from measured sweeps (?pool=N overrides for tuning):
     //  - phones: 2. Only ~2 performance cores; ORT's parallel-for waits for
     //    the slowest partition, so anything scheduled on an E-core gates

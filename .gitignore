@@ -72,3 +72,24 @@ webdemo/wasm/build-relaxed/
 
 # ship one sample voice so examples work out of the box
 !voices/example.wav
+
+# Optional generated steering assets and native test binary
+models/soura*.npy
+models/soura.json
+pocket-tts-steering-test
+
+# Optional generated browser steering assets
+webdemo/models/soura*.npy
+webdemo/models/soura*.json
+# The web UI defaults to this small, versioned Varkos vector set.
+!webdemo/models/soura_vectors.derived.npy
+!webdemo/models/soura_vectors.derived.json
+
+# Required browser ONNX assets ship compressed; raw ONNX stays ignored.
+!webdemo/models/flow_lm_main_delta_attn_flow_int8.onnx.br
+!webdemo/models/flow_lm_main_delta_attn_flow_int8_soura.onnx.br
+!webdemo/models/flow_lm_main_delta_flow_int8.onnx.br
+!webdemo/models/flow_lm_main_delta_flow_int8_soura.onnx.br
+!webdemo/models/mimi_decoder_delta_int8.onnx.br
+!webdemo/models/mimi_encoder.onnx.br
+!webdemo/models/text_conditioner.onnx.br
